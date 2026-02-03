@@ -99,6 +99,8 @@ def add(
     priority: int = typer.Option(1, "--priority", "-P", help="Priority (1=p4 lowest, 4=p1 highest)"),
     due: Optional[str] = typer.Option(None, "--due", "-D", help="Due date (e.g., 'today', 'tomorrow', '2024-12-31')"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="Hard deadline date (YYYY-MM-DD format)"),
+    duration: Optional[int] = typer.Option(None, "--duration", help="Task duration amount"),
+    duration_unit: Optional[str] = typer.Option(None, "--duration-unit", help="Duration unit: 'minute' or 'day'"),
     labels: Optional[str] = typer.Option(None, "--labels", "-l", help="Labels (comma-separated)"),
 ):
     """Add a new task."""
@@ -129,8 +131,18 @@ def add(
         try:
             kwargs["deadline_date"] = datetime.strptime(deadline, "%Y-%m-%d").date()
         except ValueError:
-            console.print(f"[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
+            console.print("[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
             raise typer.Exit(1)
+
+    if duration is not None or duration_unit is not None:
+        if duration is None or duration_unit is None:
+            console.print("[red]Both --duration and --duration-unit must be specified together[/red]")
+            raise typer.Exit(1)
+        if duration_unit not in ("minute", "day"):
+            console.print("[red]Duration unit must be 'minute' or 'day'[/red]")
+            raise typer.Exit(1)
+        kwargs["duration"] = duration
+        kwargs["duration_unit"] = duration_unit
 
     if labels:
         kwargs["labels"] = [l.strip() for l in labels.split(",")]
@@ -141,6 +153,8 @@ def add(
         console.print(f"[dim]Description: {task.description}[/dim]")
     if task.deadline:
         console.print(f"[dim]Deadline: {task.deadline.date}[/dim]")
+    if task.duration:
+        console.print(f"[dim]Duration: {task.duration.amount} {task.duration.unit}(s)[/dim]")
 
 
 # --- Quick Add Command ---
@@ -204,6 +218,22 @@ def close(
         raise typer.Exit(1)
 
 
+# --- Reopen Command ---
+@app.command()
+def reopen(
+    task_id: str = typer.Argument(..., help="Task ID to reopen"),
+):
+    """Reopen a completed task."""
+    api = get_api()
+
+    try:
+        api.uncomplete_task(task_id)
+        console.print(f"[green]Reopened task:[/green] {task_id}")
+    except Exception as e:
+        console.print(f"[red]Failed to reopen task: {e}[/red]")
+        raise typer.Exit(1)
+
+
 # --- Delete Command ---
 @app.command()
 def delete(
@@ -239,6 +269,8 @@ def modify(
     priority: Optional[int] = typer.Option(None, "--priority", "-P", help="New priority (1-4)"),
     due: Optional[str] = typer.Option(None, "--due", "-D", help="New due date"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="New deadline date (YYYY-MM-DD format)"),
+    duration: Optional[int] = typer.Option(None, "--duration", help="Task duration amount"),
+    duration_unit: Optional[str] = typer.Option(None, "--duration-unit", help="Duration unit: 'minute' or 'day'"),
     labels: Optional[str] = typer.Option(None, "--labels", "-l", help="New labels (comma-separated)"),
 ):
     """Modify an existing task."""
@@ -257,8 +289,17 @@ def modify(
         try:
             kwargs["deadline_date"] = datetime.strptime(deadline, "%Y-%m-%d").date()
         except ValueError:
-            console.print(f"[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
+            console.print("[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
             raise typer.Exit(1)
+    if duration is not None or duration_unit is not None:
+        if duration is None or duration_unit is None:
+            console.print("[red]Both --duration and --duration-unit must be specified together[/red]")
+            raise typer.Exit(1)
+        if duration_unit not in ("minute", "day"):
+            console.print("[red]Duration unit must be 'minute' or 'day'[/red]")
+            raise typer.Exit(1)
+        kwargs["duration"] = duration
+        kwargs["duration_unit"] = duration_unit
     if labels is not None:
         kwargs["labels"] = [l.strip() for l in labels.split(",")] if labels else []
 

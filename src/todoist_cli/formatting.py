@@ -49,11 +49,24 @@ def format_deadline(deadline) -> str:
     return str(deadline)
 
 
+def format_duration(duration) -> str:
+    """Format task duration."""
+    if not duration:
+        return ""
+    if hasattr(duration, "amount") and hasattr(duration, "unit"):
+        unit = duration.unit
+        if duration.amount == 1:
+            return f"{duration.amount} {unit}"
+        return f"{duration.amount} {unit}s"
+    return str(duration)
+
+
 def print_task(task: Task, show_description: bool = False, project_name: str | None = None) -> None:
     """Print a single task."""
     priority = format_priority(task.priority)
     due = format_due(task.due)
     deadline = format_deadline(task.deadline)
+    duration = format_duration(task.duration)
 
     # Build the task line
     line = Text()
@@ -64,6 +77,8 @@ def print_task(task: Task, show_description: bool = False, project_name: str | N
         line.append(f"[{due}] ", style="magenta")
     if deadline:
         line.append(f"(deadline: {deadline}) ", style="red")
+    if duration:
+        line.append(f"~{duration} ", style="cyan")
     if project_name:
         line.append(f"#{project_name} ", style="blue")
     if task.labels:
@@ -150,6 +165,9 @@ def print_task_detail(task: Task, comments: list[Comment] | None = None, project
     if task.deadline:
         console.print(f"[bold]Deadline:[/bold] [red]{format_deadline(task.deadline)}[/red]")
 
+    if task.duration:
+        console.print(f"[bold]Duration:[/bold] {format_duration(task.duration)}")
+
     if project_name:
         console.print(f"[bold]Project:[/bold] {project_name}")
 
@@ -157,7 +175,7 @@ def print_task_detail(task: Task, comments: list[Comment] | None = None, project
         console.print(f"[bold]Labels:[/bold] {', '.join(task.labels)}")
 
     if task.description:
-        console.print(f"\n[bold]Description:[/bold]")
+        console.print("\n[bold]Description:[/bold]")
         console.print(f"  {task.description}")
 
     if comments:
