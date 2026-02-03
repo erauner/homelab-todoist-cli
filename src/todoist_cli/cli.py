@@ -1,5 +1,6 @@
 """Todoist CLI - Main command-line interface."""
 
+from datetime import date, datetime
 from typing import Optional
 import typer
 from rich.console import Console
@@ -97,6 +98,7 @@ def add(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project name"),
     priority: int = typer.Option(1, "--priority", "-P", help="Priority (1=p4 lowest, 4=p1 highest)"),
     due: Optional[str] = typer.Option(None, "--due", "-D", help="Due date (e.g., 'today', 'tomorrow', '2024-12-31')"),
+    deadline: Optional[str] = typer.Option(None, "--deadline", help="Hard deadline date (YYYY-MM-DD format)"),
     labels: Optional[str] = typer.Option(None, "--labels", "-l", help="Labels (comma-separated)"),
 ):
     """Add a new task."""
@@ -123,6 +125,13 @@ def add(
     if due:
         kwargs["due_string"] = due
 
+    if deadline:
+        try:
+            kwargs["deadline_date"] = datetime.strptime(deadline, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
+            raise typer.Exit(1)
+
     if labels:
         kwargs["labels"] = [l.strip() for l in labels.split(",")]
 
@@ -130,6 +139,8 @@ def add(
     console.print(f"[green]Created task:[/green] {task.id} - {task.content}")
     if task.description:
         console.print(f"[dim]Description: {task.description}[/dim]")
+    if task.deadline:
+        console.print(f"[dim]Deadline: {task.deadline.date}[/dim]")
 
 
 # --- Quick Add Command ---
@@ -227,6 +238,7 @@ def modify(
     description: Optional[str] = typer.Option(None, "--description", "-d", help="New description"),
     priority: Optional[int] = typer.Option(None, "--priority", "-P", help="New priority (1-4)"),
     due: Optional[str] = typer.Option(None, "--due", "-D", help="New due date"),
+    deadline: Optional[str] = typer.Option(None, "--deadline", help="New deadline date (YYYY-MM-DD format)"),
     labels: Optional[str] = typer.Option(None, "--labels", "-l", help="New labels (comma-separated)"),
 ):
     """Modify an existing task."""
@@ -241,6 +253,12 @@ def modify(
         kwargs["priority"] = priority
     if due:
         kwargs["due_string"] = due
+    if deadline:
+        try:
+            kwargs["deadline_date"] = datetime.strptime(deadline, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
+            raise typer.Exit(1)
     if labels is not None:
         kwargs["labels"] = [l.strip() for l in labels.split(",")] if labels else []
 

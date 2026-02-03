@@ -40,10 +40,20 @@ def format_due(due) -> str:
     return str(due)
 
 
+def format_deadline(deadline) -> str:
+    """Format deadline date."""
+    if not deadline:
+        return ""
+    if hasattr(deadline, "date"):
+        return deadline.date
+    return str(deadline)
+
+
 def print_task(task: Task, show_description: bool = False, project_name: str | None = None) -> None:
     """Print a single task."""
     priority = format_priority(task.priority)
     due = format_due(task.due)
+    deadline = format_deadline(task.deadline)
 
     # Build the task line
     line = Text()
@@ -52,6 +62,8 @@ def print_task(task: Task, show_description: bool = False, project_name: str | N
     line.append(" ")
     if due:
         line.append(f"[{due}] ", style="magenta")
+    if deadline:
+        line.append(f"(deadline: {deadline}) ", style="red")
     if project_name:
         line.append(f"#{project_name} ", style="blue")
     if task.labels:
@@ -70,6 +82,7 @@ def print_tasks_table(tasks: list[Task], projects: dict[str, str] | None = None)
     table.add_column("ID", style="dim cyan", width=12)
     table.add_column("P", width=3)
     table.add_column("Due", style="magenta", width=12)
+    table.add_column("Deadline", style="red", width=12)
     table.add_column("Project", style="blue", width=15)
     table.add_column("Content")
 
@@ -82,6 +95,7 @@ def print_tasks_table(tasks: list[Task], projects: dict[str, str] | None = None)
             task.id,
             PRIORITY_LABELS.get(task.priority, "p4"),
             format_due(task.due),
+            format_deadline(task.deadline),
             project_name,
             task.content,
         )
@@ -132,6 +146,9 @@ def print_task_detail(task: Task, comments: list[Comment] | None = None, project
 
     if task.due:
         console.print(f"[bold]Due:[/bold] {format_due(task.due)}")
+
+    if task.deadline:
+        console.print(f"[bold]Deadline:[/bold] [red]{format_deadline(task.deadline)}[/red]")
 
     if project_name:
         console.print(f"[bold]Project:[/bold] {project_name}")
