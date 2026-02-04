@@ -266,6 +266,107 @@ def postpone(
         raise typer.Exit(1)
 
 
+# --- Snooze Command ---
+@app.command()
+def snooze(
+    target: str = typer.Argument(..., help="Target date: 'tomorrow', 'weekend', 'monday', 'next week', or natural language"),
+    overdue_only: bool = typer.Option(False, "--overdue-only", "-o", help="Only snooze overdue tasks (not today's)"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview what would be snoozed without making changes"),
+):
+    """Bulk snooze overdue and today's tasks to a target date.
+
+    Presets:
+        tomorrow   - Move to tomorrow
+        weekend    - Move to Saturday
+        monday     - Move to next Monday
+        next week  - Move to next Monday
+
+    Examples:
+        td snooze tomorrow           # All overdue + today → tomorrow
+        td snooze weekend            # → Saturday
+        td snooze monday             # → Next Monday
+        td snooze tomorrow --overdue-only  # Only overdue tasks
+        td snooze tomorrow --dry-run       # Preview without changing
+    """
+    api = get_api()
+
+    # Map presets to natural language strings
+    target_lower = target.lower().strip()
+    preset_map = {
+        "weekend": "saturday",
+        "next week": "next monday",
+    }
+    due_string = preset_map.get(target_lower, target_lower)
+
+    # Build filter - Todoist REST API doesn't support filter param directly
+    # We need to fetch all tasks and filter locally
+    tasks = []
+    for page in api.get_tasks():
+        tasks.extend(page)
+
+    # Filter for overdue and today tasks
+    today_str = date.today().isoformat()
+    tasks_to_snooze = []
+
+    for task in tasks:
+        if not task.due:
+            continue
+
+        # Get the due date
+        due_date = None
+        if hasattr(task.due, "date"):
+            due_date = task.due.date
+
+        if not due_date:
+            continue
+
+        # Check if overdue or today
+        is_overdue = due_date < today_str
+        is_today = due_date == today_str
+
+        if overdue_only:
+            if is_overdue:
+                tasks_to_snooze.append((task, "overdue"))
+        else:
+            if is_overdue:
+                tasks_to_snooze.append((task, "overdue"))
+            elif is_today:
+                tasks_to_snooze.append((task, "today"))
+
+    if not tasks_to_snooze:
+        scope = "overdue" if overdue_only else "overdue or due today"
+        console.print(f"[dim]No {scope} tasks to snooze[/dim]")
+        return
+
+    # Show preview
+    console.print(f"\n[bold]Tasks to snooze → {due_string}:[/bold]")
+    for task, status in tasks_to_snooze:
+        status_style = "red" if status == "overdue" else "yellow"
+        console.print(f"  [{status_style}]{status}[/{status_style}] {task.content} (due: {task.due.date})")
+
+    console.print(f"\n[bold]{len(tasks_to_snooze)} task(s) will be snoozed to {due_string}[/bold]")
+
+    if dry_run:
+        console.print("[yellow]Dry run - no changes made[/yellow]")
+        return
+
+    # Actually snooze the tasks
+    success_count = 0
+    fail_count = 0
+    for task, _ in tasks_to_snooze:
+        try:
+            api.update_task(task.id, due_string=due_string)
+            success_count += 1
+        except Exception as e:
+            console.print(f"[red]Failed to snooze {task.id}: {e}[/red]")
+            fail_count += 1
+
+    if success_count > 0:
+        console.print(f"[green]Snoozed {success_count} task(s) to {due_string}[/green]")
+    if fail_count > 0:
+        console.print(f"[red]Failed to snooze {fail_count} task(s)[/red]")
+
+
 # --- Delete Command ---
 @app.command()
 def delete(
