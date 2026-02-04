@@ -234,6 +234,38 @@ def reopen(
         raise typer.Exit(1)
 
 
+# --- Postpone Command ---
+@app.command()
+def postpone(
+    task_id: str = typer.Argument(..., help="Task ID to postpone"),
+    time: str = typer.Argument(..., help="Time to postpone (e.g., '2 hours', '1 day', 'tomorrow', '3 days')"),
+):
+    """Postpone a task's due date by a relative amount.
+
+    Examples:
+        td postpone <id> "2 hours"
+        td postpone <id> "1 day"
+        td postpone <id> "tomorrow"
+        td postpone <id> "next monday"
+    """
+    api = get_api()
+
+    # Prepend "in" if the time doesn't start with common keywords
+    time_lower = time.lower().strip()
+    if not any(time_lower.startswith(kw) for kw in ("in ", "tomorrow", "today", "next ", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")):
+        due_string = f"in {time}"
+    else:
+        due_string = time
+
+    try:
+        task = api.update_task(task_id, due_string=due_string)
+        new_due = task.due.string if task.due else "no due date"
+        console.print(f"[green]Postponed task:[/green] {task_id} → {new_due}")
+    except Exception as e:
+        console.print(f"[red]Failed to postpone task: {e}[/red]")
+        raise typer.Exit(1)
+
+
 # --- Delete Command ---
 @app.command()
 def delete(
