@@ -457,6 +457,49 @@ def move(
         raise typer.Exit(1)
 
 
+# --- Recent Command ---
+@app.command()
+def recent(
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of tasks to show"),
+    show_description: bool = typer.Option(False, "--description", "-d", help="Show task descriptions"),
+):
+    """Show recently created tasks.
+
+    Lists tasks sorted by creation date (newest first).
+    Useful for seeing what you've added recently.
+
+    Examples:
+        td recent              # Show 10 most recent tasks
+        td recent -n 20        # Show 20 most recent
+        td recent -d           # Show with descriptions
+    """
+    api = get_api()
+    project_map = get_project_map(api)
+
+    # Fetch all tasks
+    tasks = []
+    for page in api.get_tasks():
+        tasks.extend(page)
+
+    # Sort by created_at (newest first)
+    tasks_sorted = sorted(tasks, key=lambda t: t.created_at, reverse=True)
+
+    # Limit results
+    tasks_to_show = tasks_sorted[:limit]
+
+    if not tasks_to_show:
+        console.print("[dim]No tasks found[/dim]")
+        return
+
+    console.print(f"\n[bold]Recently created tasks ({len(tasks_to_show)} of {len(tasks)}):[/bold]\n")
+    for task in tasks_to_show:
+        project_name = project_map.get(task.project_id, "")
+        # Show created date
+        created = task.created_at[:10] if task.created_at else ""
+        console.print(f"[dim]{created}[/dim] ", end="")
+        print_task(task, show_description=show_description, project_name=project_name)
+
+
 # --- Delete Command ---
 @app.command()
 def delete(
