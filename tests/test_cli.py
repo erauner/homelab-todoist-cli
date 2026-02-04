@@ -18,7 +18,10 @@ def make_mock_task(
     project_id: str = "proj1",
     labels: list = None,
     due = None,
+    deadline = None,
+    duration = None,
     url: str = "https://todoist.com/task/123",
+    created_at: str = "2025-01-15T10:00:00Z",
 ):
     """Create a mock task object."""
     task = MagicMock()
@@ -29,16 +32,29 @@ def make_mock_task(
     task.project_id = project_id
     task.labels = labels or []
     task.due = due
+    task.deadline = deadline
+    task.duration = duration
     task.url = url
+    task.created_at = created_at
     return task
 
 
-def make_mock_project(id: str = "proj1", name: str = "Inbox", color: str = "grey"):
+def make_mock_due(date: str, string: str = None, datetime: str = None):
+    """Create a mock due object."""
+    due = MagicMock()
+    due.date = date
+    due.string = string or date
+    due.datetime = datetime
+    return due
+
+
+def make_mock_project(id: str = "proj1", name: str = "Inbox", color: str = "grey", inbox_project: bool = False):
     """Create a mock project object."""
     project = MagicMock()
     project.id = id
     project.name = name
     project.color = color
+    project.inbox_project = inbox_project
     return project
 
 
@@ -460,3 +476,331 @@ class TestWorkflows:
         assert call_kwargs["due_string"] == "next friday"
         assert call_kwargs["project_id"] == "work_proj"
         assert call_kwargs["labels"] == ["reports"]
+
+
+class TestReopen:
+    """Tests for reopen command."""
+
+    def test_reopen_task(self, mock_api, mock_token):
+        """Reopen uncompletes task."""
+        result = runner.invoke(app, ["reopen", "123"])
+        assert result.exit_code == 0
+        assert "Reopened task" in result.output
+        mock_api.uncomplete_task.assert_called_once_with("123")
+
+    def test_reopen_task_not_found(self, mock_api, mock_token):
+        """Reopen handles missing task."""
+        mock_api.uncomplete_task.side_effect = Exception("Not found")
+
+        result = runner.invoke(app, ["reopen", "nonexistent"])
+        assert result.exit_code == 1
+        assert "Failed to reopen" in result.output
+
+
+class TestPostpone:
+    """Tests for postpone command."""
+
+    def test_postpone_with_relative_time(self, mock_api, mock_token):
+        """Postpone updates due date with relative time."""
+        mock_due = make_mock_due(date="2025-02-05", string="in 2 days")
+        mock_api.update_task.return_value = make_mock_task(due=mock_due)
+
+        result = runner.invoke(app, ["postpone", "123", "2 days"])
+        assert result.exit_code == 0
+        assert "Postponed task" in result.output
+        call_kwargs = mock_api.update_task.call_args[1]
+        assert call_kwargs["due_string"] == "in 2 days"
+
+    def test_postpone_with_tomorrow(self, mock_api, mock_token):
+        """Postpone with 'tomorrow' uses natural language."""
+        mock_due = make_mock_due(date="2025-02-04", string="tomorrow")
+        mock_api.update_task.return_value = make_mock_task(due=mock_due)
+
+        result = runner.invoke(app, ["postpone", "123", "tomorrow"])
+        assert result.exit_code == 0
+        call_kwargs = mock_api.update_task.call_args[1]
+        assert call_kwargs["due_string"] == "tomorrow"
+
+    def test_postpone_failure(self, mock_api, mock_token):
+        """Postpone handles API error."""
+        mock_api.update_task.side_effect = Exception("API error")
+
+        result = runner.invoke(app, ["postpone", "123", "2 days"])
+        assert result.exit_code == 1
+        assert "Failed to postpone" in result.output
+
+
+class TestSnooze:
+    """Tests for snooze command."""
+
+    def test_snooze_no_tasks(self, mock_api, mock_token):
+        """Snooze with no overdue/today tasks shows message."""
+        mock_api.get_tasks.return_value = iter([[]])
+
+        result = runner.invoke(app, ["snooze", "tomorrow"])
+        assert result.exit_code == 0
+        assert "No" in result.output and "tasks to snooze" in result.output
+
+    def test_snooze_dry_run(self, mock_api, mock_token):
+        """Snooze dry-run shows preview without changes."""
+        from datetime import date
+        today = date.today().isoformat()
+        mock_due = make_mock_due(date=today)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Today task", due=mock_due),
+        ]])
+
+        result = runner.invoke(app, ["snooze", "tomorrow", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Today task" in result.output
+        assert "Dry run" in result.output
+        mock_api.update_task.assert_not_called()
+
+    def test_snooze_overdue_tasks(self, mock_api, mock_token):
+        """Snooze updates overdue tasks."""
+        mock_due = make_mock_due(date="2020-01-01")  # In the past
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Overdue task", due=mock_due),
+        ]])
+
+        result = runner.invoke(app, ["snooze", "tomorrow"])
+        assert result.exit_code == 0
+        assert "Snoozed" in result.output
+        mock_api.update_task.assert_called_once()
+
+    def test_snooze_overdue_only(self, mock_api, mock_token):
+        """Snooze with --overdue-only excludes today's tasks."""
+        from datetime import date
+        today = date.today().isoformat()
+        overdue_due = make_mock_due(date="2020-01-01")
+        today_due = make_mock_due(date=today)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Overdue task", due=overdue_due),
+            make_mock_task(id="2", content="Today task", due=today_due),
+        ]])
+
+        result = runner.invoke(app, ["snooze", "tomorrow", "--overdue-only", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Overdue task" in result.output
+        assert "Today task" not in result.output
+
+
+class TestInbox:
+    """Tests for inbox command."""
+
+    def test_inbox_empty(self, mock_api, mock_token):
+        """Inbox shows message when empty."""
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="inbox_id", name="Inbox", inbox_project=True),
+        ]])
+        mock_api.get_tasks.return_value = iter([[]])
+
+        result = runner.invoke(app, ["inbox"])
+        assert result.exit_code == 0
+        assert "empty" in result.output.lower()
+
+    def test_inbox_with_tasks(self, mock_api, mock_token):
+        """Inbox lists tasks in inbox project."""
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="inbox_id", name="Inbox", inbox_project=True),
+        ]])
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Inbox task 1", project_id="inbox_id"),
+            make_mock_task(id="2", content="Inbox task 2", project_id="inbox_id"),
+        ]])
+
+        result = runner.invoke(app, ["inbox"])
+        assert result.exit_code == 0
+        assert "Inbox task 1" in result.output
+        assert "Inbox task 2" in result.output
+
+    def test_inbox_count_only(self, mock_api, mock_token):
+        """Inbox --count shows only count."""
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="inbox_id", name="Inbox", inbox_project=True),
+        ]])
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Task 1", project_id="inbox_id"),
+            make_mock_task(id="2", content="Task 2", project_id="inbox_id"),
+        ]])
+
+        result = runner.invoke(app, ["inbox", "--count"])
+        assert result.exit_code == 0
+        assert "2" in result.output
+        assert "task(s) in inbox" in result.output
+
+
+class TestMove:
+    """Tests for move command."""
+
+    def test_move_task(self, mock_api, mock_token):
+        """Move moves task to project."""
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="work_id", name="Work"),
+        ]])
+        mock_api.move_task.return_value = make_mock_task(content="Moved task", project_id="work_id")
+
+        result = runner.invoke(app, ["move", "123", "Work"])
+        assert result.exit_code == 0
+        assert "Moved task to Work" in result.output
+        mock_api.move_task.assert_called_once_with(task_id="123", project_id="work_id")
+
+    def test_move_project_not_found(self, mock_api, mock_token):
+        """Move shows error when project not found."""
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="proj1", name="Inbox"),
+        ]])
+
+        result = runner.invoke(app, ["move", "123", "NonExistent"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+
+class TestToday:
+    """Tests for today command."""
+
+    def test_today_no_tasks(self, mock_api, mock_token):
+        """Today shows message when no tasks due."""
+        mock_api.get_tasks.return_value = iter([[]])
+
+        result = runner.invoke(app, ["today"])
+        assert result.exit_code == 0
+        assert "Nothing due today" in result.output
+
+    def test_today_with_tasks(self, mock_api, mock_token):
+        """Today shows tasks due today."""
+        from datetime import date
+        today = date.today().isoformat()
+        mock_due = make_mock_due(date=today)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Today task", due=mock_due),
+        ]])
+
+        result = runner.invoke(app, ["today"])
+        assert result.exit_code == 0
+        assert "Today task" in result.output
+
+    def test_today_includes_overdue(self, mock_api, mock_token):
+        """Today includes overdue tasks by default."""
+        from datetime import date
+        today = date.today().isoformat()
+        overdue_due = make_mock_due(date="2020-01-01")
+        today_due = make_mock_due(date=today)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Overdue task", due=overdue_due),
+            make_mock_task(id="2", content="Today task", due=today_due),
+        ]])
+
+        result = runner.invoke(app, ["today"])
+        assert result.exit_code == 0
+        assert "Overdue task" in result.output
+        assert "Today task" in result.output
+        assert "overdue" in result.output.lower()
+
+    def test_today_no_overdue_flag(self, mock_api, mock_token):
+        """Today with --no-overdue excludes overdue tasks."""
+        from datetime import date
+        today = date.today().isoformat()
+        overdue_due = make_mock_due(date="2020-01-01")
+        today_due = make_mock_due(date=today)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Overdue task", due=overdue_due),
+            make_mock_task(id="2", content="Today task", due=today_due),
+        ]])
+
+        result = runner.invoke(app, ["today", "--no-overdue"])
+        assert result.exit_code == 0
+        assert "Overdue task" not in result.output
+        assert "Today task" in result.output
+
+
+class TestUpcoming:
+    """Tests for upcoming command."""
+
+    def test_upcoming_no_tasks(self, mock_api, mock_token):
+        """Upcoming shows message when no tasks."""
+        mock_api.get_tasks.return_value = iter([[]])
+
+        result = runner.invoke(app, ["upcoming"])
+        assert result.exit_code == 0
+        assert "Nothing due" in result.output
+
+    def test_upcoming_default_7_days(self, mock_api, mock_token):
+        """Upcoming shows tasks in next 7 days by default."""
+        from datetime import date, timedelta
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        mock_due = make_mock_due(date=tomorrow)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Tomorrow task", due=mock_due),
+        ]])
+
+        result = runner.invoke(app, ["upcoming"])
+        assert result.exit_code == 0
+        assert "Tomorrow task" in result.output
+        assert "7 days" in result.output
+
+    def test_upcoming_custom_days(self, mock_api, mock_token):
+        """Upcoming respects custom days argument."""
+        from datetime import date, timedelta
+        in_3_days = (date.today() + timedelta(days=3)).isoformat()
+        mock_due = make_mock_due(date=in_3_days)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Future task", due=mock_due),
+        ]])
+
+        result = runner.invoke(app, ["upcoming", "5"])
+        assert result.exit_code == 0
+        assert "Future task" in result.output
+        assert "5 days" in result.output
+
+    def test_upcoming_excludes_far_future(self, mock_api, mock_token):
+        """Upcoming excludes tasks beyond the window."""
+        far_future = "2099-12-31"
+        mock_due = make_mock_due(date=far_future)
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Far future task", due=mock_due),
+        ]])
+
+        result = runner.invoke(app, ["upcoming", "7"])
+        assert result.exit_code == 0
+        assert "Far future task" not in result.output
+
+
+class TestRecent:
+    """Tests for recent command."""
+
+    def test_recent_no_tasks(self, mock_api, mock_token):
+        """Recent shows message when no tasks."""
+        mock_api.get_tasks.return_value = iter([[]])
+
+        result = runner.invoke(app, ["recent"])
+        assert result.exit_code == 0
+        assert "No tasks found" in result.output
+
+    def test_recent_shows_newest_first(self, mock_api, mock_token):
+        """Recent sorts by created_at descending."""
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Older task", created_at="2025-01-01T10:00:00Z"),
+            make_mock_task(id="2", content="Newer task", created_at="2025-01-15T10:00:00Z"),
+        ]])
+
+        result = runner.invoke(app, ["recent"])
+        assert result.exit_code == 0
+        # Newer task should appear before older task
+        newer_pos = result.output.find("Newer task")
+        older_pos = result.output.find("Older task")
+        assert newer_pos < older_pos
+
+    def test_recent_respects_limit(self, mock_api, mock_token):
+        """Recent limits results with -n."""
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Task 1", created_at="2025-01-03T10:00:00Z"),
+            make_mock_task(id="2", content="Task 2", created_at="2025-01-02T10:00:00Z"),
+            make_mock_task(id="3", content="Task 3", created_at="2025-01-01T10:00:00Z"),
+        ]])
+
+        result = runner.invoke(app, ["recent", "-n", "2"])
+        assert result.exit_code == 0
+        assert "Task 1" in result.output
+        assert "Task 2" in result.output
+        assert "Task 3" not in result.output
