@@ -1,6 +1,6 @@
 """Todoist CLI - Main command-line interface."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 import typer
 from rich.console import Console
@@ -455,6 +455,148 @@ def move(
     except Exception as e:
         console.print(f"[red]Failed to move task: {e}[/red]")
         raise typer.Exit(1)
+
+
+# --- Today Command ---
+@app.command()
+def today(
+    include_overdue: bool = typer.Option(True, "--overdue/--no-overdue", "-o/-O", help="Include overdue tasks"),
+    show_description: bool = typer.Option(False, "--description", "-d", help="Show task descriptions"),
+):
+    """Show tasks due today (and optionally overdue).
+
+    Perfect for daily review - see what needs attention today.
+
+    Examples:
+        td today              # Today + overdue tasks
+        td today --no-overdue # Only today's tasks
+        td today -d           # With descriptions
+    """
+    api = get_api()
+    project_map = get_project_map(api)
+
+    # Fetch all tasks
+    tasks = []
+    for page in api.get_tasks():
+        tasks.extend(page)
+
+    today_str = date.today().isoformat()
+    tasks_to_show = []
+
+    for task in tasks:
+        if not task.due:
+            continue
+
+        due_date = task.due.date if hasattr(task.due, "date") else None
+        if not due_date:
+            continue
+
+        is_overdue = due_date < today_str
+        is_today = due_date == today_str
+
+        if is_today:
+            tasks_to_show.append((task, "today"))
+        elif is_overdue and include_overdue:
+            tasks_to_show.append((task, "overdue"))
+
+    # Sort: overdue first (by date), then today
+    tasks_to_show.sort(key=lambda x: (x[1] != "overdue", x[0].due.date))
+
+    if not tasks_to_show:
+        console.print("[green]Nothing due today![/green]")
+        return
+
+    overdue_count = sum(1 for _, status in tasks_to_show if status == "overdue")
+    today_count = sum(1 for _, status in tasks_to_show if status == "today")
+
+    header = f"[bold]Today ({today_count} tasks)"
+    if overdue_count > 0:
+        header += f" + {overdue_count} overdue"
+    header += ":[/bold]\n"
+    console.print(f"\n{header}")
+
+    for task, status in tasks_to_show:
+        project_name = project_map.get(task.project_id, "")
+        if status == "overdue":
+            console.print("[red]overdue[/red] ", end="")
+        print_task(task, show_description=show_description, project_name=project_name)
+
+
+# --- Upcoming Command ---
+@app.command()
+def upcoming(
+    days: int = typer.Argument(7, help="Number of days to look ahead"),
+    show_description: bool = typer.Option(False, "--description", "-d", help="Show task descriptions"),
+):
+    """Show tasks due in the next N days.
+
+    Great for weekly planning - see what's coming up.
+
+    Examples:
+        td upcoming           # Next 7 days (default)
+        td upcoming 3         # Next 3 days
+        td upcoming 14        # Next 2 weeks
+        td upcoming 7 -d      # With descriptions
+    """
+    api = get_api()
+    project_map = get_project_map(api)
+
+    # Fetch all tasks
+    tasks = []
+    for page in api.get_tasks():
+        tasks.extend(page)
+
+    today_date = date.today()
+    today_str = today_date.isoformat()
+    end_date = today_date + timedelta(days=days)
+    end_str = end_date.isoformat()
+
+    tasks_to_show = []
+
+    for task in tasks:
+        if not task.due:
+            continue
+
+        due_date = task.due.date if hasattr(task.due, "date") else None
+        if not due_date:
+            continue
+
+        # Include tasks from today through end_date
+        if today_str <= due_date <= end_str:
+            tasks_to_show.append(task)
+
+    # Sort by due date
+    tasks_to_show.sort(key=lambda t: t.due.date)
+
+    if not tasks_to_show:
+        console.print(f"[green]Nothing due in the next {days} days![/green]")
+        return
+
+    console.print(f"\n[bold]Upcoming ({len(tasks_to_show)} tasks in next {days} days):[/bold]\n")
+
+    # Group by date for readability
+    current_date = None
+    for task in tasks_to_show:
+        task_date = task.due.date
+        if task_date != current_date:
+            current_date = task_date
+            # Format date header
+            try:
+                dt = datetime.strptime(task_date, "%Y-%m-%d")
+                day_name = dt.strftime("%A")
+                if task_date == today_str:
+                    day_label = "Today"
+                elif task_date == (today_date + timedelta(days=1)).isoformat():
+                    day_label = "Tomorrow"
+                else:
+                    day_label = day_name
+                console.print(f"\n[bold cyan]{day_label} ({task_date}):[/bold cyan]")
+            except ValueError:
+                console.print(f"\n[bold cyan]{task_date}:[/bold cyan]")
+
+        project_name = project_map.get(task.project_id, "")
+        console.print("  ", end="")
+        print_task(task, show_description=show_description, project_name=project_name)
 
 
 # --- Recent Command ---
