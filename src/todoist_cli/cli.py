@@ -367,6 +367,96 @@ def snooze(
         console.print(f"[red]Failed to snooze {fail_count} task(s)[/red]")
 
 
+# --- Inbox Command ---
+@app.command()
+def inbox(
+    count_only: bool = typer.Option(False, "--count", "-c", help="Only show count of inbox tasks"),
+    show_description: bool = typer.Option(False, "--description", "-d", help="Show task descriptions"),
+):
+    """List tasks in the Inbox (no project assigned).
+
+    In GTD, the inbox contains unprocessed items that need to be
+    organized into projects, given due dates, or acted upon.
+
+    Examples:
+        td inbox              # List all inbox tasks
+        td inbox --count      # Just show the count
+        td inbox -d           # Show with descriptions
+    """
+    api = get_api()
+
+    # Find the Inbox project ID
+    inbox_project_id = None
+    for page in api.get_projects():
+        for p in page:
+            if p.inbox_project:
+                inbox_project_id = p.id
+                break
+        if inbox_project_id:
+            break
+
+    if not inbox_project_id:
+        console.print("[red]Could not find Inbox project[/red]")
+        raise typer.Exit(1)
+
+    # Get tasks in inbox
+    tasks = []
+    for page in api.get_tasks(project_id=inbox_project_id):
+        tasks.extend(page)
+
+    if count_only:
+        console.print(f"[bold]{len(tasks)}[/bold] task(s) in inbox")
+        return
+
+    if not tasks:
+        console.print("[green]Inbox is empty![/green]")
+        return
+
+    console.print(f"\n[bold]Inbox ({len(tasks)} tasks):[/bold]\n")
+    for task in tasks:
+        print_task(task, show_description=show_description)
+
+
+# --- Move Command ---
+@app.command()
+def move(
+    task_id: str = typer.Argument(..., help="Task ID to move"),
+    project_name: str = typer.Argument(..., help="Target project name"),
+):
+    """Move a task to a different project.
+
+    Useful for GTD inbox processing - quickly assign tasks to projects.
+
+    Examples:
+        td move 12345 "Work"
+        td move 12345 "Someday/Maybe"
+        td move 12345 "Personal"
+    """
+    api = get_api()
+
+    # Find the target project ID
+    project_map = get_project_map(api)
+    target_project_id = None
+    for pid, pname in project_map.items():
+        if pname.lower() == project_name.lower():
+            target_project_id = pid
+            break
+
+    if not target_project_id:
+        console.print(f"[red]Project '{project_name}' not found[/red]")
+        console.print("\n[dim]Available projects:[/dim]")
+        for pname in sorted(project_map.values()):
+            console.print(f"  {pname}")
+        raise typer.Exit(1)
+
+    try:
+        task = api.move_task(task_id=task_id, project_id=target_project_id)
+        console.print(f"[green]Moved task to {project_name}:[/green] {task.content}")
+    except Exception as e:
+        console.print(f"[red]Failed to move task: {e}[/red]")
+        raise typer.Exit(1)
+
+
 # --- Delete Command ---
 @app.command()
 def delete(
