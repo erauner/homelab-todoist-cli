@@ -1,3 +1,3 @@
 """Todoist CLI - Full-featured command-line interface for Todoist."""
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
