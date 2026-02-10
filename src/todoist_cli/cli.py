@@ -211,7 +211,7 @@ def close(
     api = get_api()
 
     try:
-        api.close_task(task_id)
+        api.complete_task(task_id)
         console.print(f"[green]Completed task:[/green] {task_id}")
     except Exception as e:
         console.print(f"[red]Failed to close task: {e}[/red]")

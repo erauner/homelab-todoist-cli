@@ -350,7 +350,7 @@ class TestClose:
         result = runner.invoke(app, ["close", "123"])
         assert result.exit_code == 0
         assert "Completed task" in result.output
-        mock_api.close_task.assert_called_once_with("123")
+        mock_api.complete_task.assert_called_once_with("123")
 
 
 class TestDelete:
