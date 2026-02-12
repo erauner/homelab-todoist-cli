@@ -1,6 +1,6 @@
 [project]
 name = "todoist-cli"
-version = "0.8.3"
+version = "0.8.4"
 description = "Custom Todoist CLI with full API support (descriptions, comments, filters)"
 readme = "README.md"
 license = { text = "MIT" }
