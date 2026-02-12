@@ -97,7 +97,7 @@ def add(
     description: Optional[str] = typer.Option(None, "--description", "-d", help="Task description"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project name"),
     priority: int = typer.Option(1, "--priority", "-P", help="Priority (1=p4 lowest, 4=p1 highest)"),
-    due: Optional[str] = typer.Option(None, "--due", "-D", help="Due date (e.g., 'today', 'tomorrow', '2024-12-31')"),
+    due: Optional[str] = typer.Option(None, "--due", "--do", "-D", help="Do date - when to work on it (e.g., 'today', 'tomorrow', 'wednesday')"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="Hard deadline date (YYYY-MM-DD format)"),
     duration: Optional[int] = typer.Option(None, "--duration", help="Task duration amount"),
     duration_unit: Optional[str] = typer.Option(None, "--duration-unit", help="Duration unit: 'minute' or 'day'"),
@@ -675,7 +675,8 @@ def modify(
     content: Optional[str] = typer.Option(None, "--content", "-c", help="New content"),
     description: Optional[str] = typer.Option(None, "--description", "-d", help="New description"),
     priority: Optional[int] = typer.Option(None, "--priority", "-P", help="New priority (1-4)"),
-    due: Optional[str] = typer.Option(None, "--due", "-D", help="New due date"),
+    due: Optional[str] = typer.Option(None, "--due", "--do", "-D", help="New do date - when to work on it"),
+    no_due: bool = typer.Option(False, "--no-due", "-N", help="Clear the due date"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="New deadline date (YYYY-MM-DD format)"),
     duration: Optional[int] = typer.Option(None, "--duration", help="Task duration amount"),
     duration_unit: Optional[str] = typer.Option(None, "--duration-unit", help="Duration unit: 'minute' or 'day'"),
@@ -684,6 +685,11 @@ def modify(
     """Modify an existing task."""
     api = get_api()
 
+    # Validate conflicting options
+    if due and no_due:
+        console.print("[red]Cannot specify both --due and --no-due[/red]")
+        raise typer.Exit(1)
+
     kwargs = {}
     if content:
         kwargs["content"] = content
@@ -691,7 +697,9 @@ def modify(
         kwargs["description"] = description
     if priority:
         kwargs["priority"] = priority
-    if due:
+    if no_due:
+        kwargs["due_string"] = "no date"
+    elif due:
         kwargs["due_string"] = due
     if deadline:
         try:
@@ -769,6 +777,46 @@ def projects():
     for page in api.get_projects():
         project_list.extend(page)
     print_projects(project_list)
+
+
+# --- Next Actions Command ---
+@app.command(name="next")
+def next_actions(
+    label_name: str = typer.Option("next_action", "--label", "-l", help="Label name for next actions"),
+    show_description: bool = typer.Option(False, "--description", "-d", help="Show task descriptions"),
+    table: bool = typer.Option(False, "--table", "-t", help="Display as table"),
+):
+    """List tasks with the next_action label (GTD next actions).
+
+    Shows all tasks that have been marked as "next actions" by Autodoist
+    or manually labeled. These are the tasks you should focus on.
+
+    Examples:
+        td next                    # List all next action tasks
+        td next -d                 # With descriptions
+        td next --table            # Table format
+        td next -l my_label        # Use different label name
+    """
+    api = get_api()
+    project_map = get_project_map(api)
+
+    # Fetch tasks with the next_action label
+    tasks = []
+    for page in api.get_tasks(label=label_name):
+        tasks.extend(page)
+
+    if not tasks:
+        console.print(f"[dim]No tasks with '{label_name}' label[/dim]")
+        return
+
+    console.print(f"\n[bold green]Next Actions ({len(tasks)} tasks):[/bold green]\n")
+
+    if table:
+        print_tasks_table(tasks, project_map)
+    else:
+        for task in tasks:
+            project_name = project_map.get(task.project_id, "")
+            print_task(task, show_description=show_description, project_name=project_name)
 
 
 # --- Labels Command ---

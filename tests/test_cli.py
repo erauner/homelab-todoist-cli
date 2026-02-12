@@ -304,6 +304,30 @@ class TestModify:
         assert result.exit_code == 1
         assert "No modifications" in result.output
 
+    def test_modify_no_due(self, mock_api, mock_token):
+        """Modify with --no-due clears due date."""
+        mock_api.update_task.return_value = make_mock_task()
+
+        result = runner.invoke(app, ["modify", "123", "--no-due"])
+        assert result.exit_code == 0
+        call_kwargs = mock_api.update_task.call_args[1]
+        assert call_kwargs["due_string"] == "no date"
+
+    def test_modify_no_due_short_flag(self, mock_api, mock_token):
+        """Modify with -N clears due date."""
+        mock_api.update_task.return_value = make_mock_task()
+
+        result = runner.invoke(app, ["modify", "123", "-N"])
+        assert result.exit_code == 0
+        call_kwargs = mock_api.update_task.call_args[1]
+        assert call_kwargs["due_string"] == "no date"
+
+    def test_modify_due_and_no_due_conflict(self, mock_api, mock_token):
+        """Modify with both --due and --no-due shows error."""
+        result = runner.invoke(app, ["modify", "123", "--due", "tomorrow", "--no-due"])
+        assert result.exit_code == 1
+        assert "Cannot specify both --due and --no-due" in result.output
+
 
 class TestComment:
     """Tests for comment command."""
