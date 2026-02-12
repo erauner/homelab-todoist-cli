@@ -900,8 +900,8 @@ def reorder(
     # Determine target child_order
     position_lower = position.lower().strip()
     if position_lower == "top":
-        # Move to position 1 (before the current first task)
-        target_order = 1
+        # Move to position 0 (before all other tasks)
+        target_order = 0
     elif position_lower == "bottom":
         # Move after the last task
         max_order = max(t.get("child_order", 0) for t in sibling_data)
