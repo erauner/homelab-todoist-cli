@@ -1,6 +1,6 @@
 [project]
 name = "todoist-cli"
-version = "0.8.4"
+version = "0.8.5"
 description = "Custom Todoist CLI with full API support (descriptions, comments, filters)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -21,6 +21,7 @@ dependencies = [
     "todoist-api-python>=3.0.0",
     "typer>=0.12.0",
     "rich>=13.7.0",
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]

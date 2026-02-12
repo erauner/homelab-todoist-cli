@@ -2,7 +2,9 @@
 
 from datetime import date, datetime, timedelta
 from typing import Optional
+import uuid
 import typer
+import requests
 from rich.console import Console
 from todoist_api_python.api import TodoistAPI
 
@@ -37,6 +39,22 @@ def get_project_map(api: TodoistAPI) -> dict[str, str]:
         for p in page:
             result[p.id] = p.name
     return result
+
+
+def sync_api_command(token: str, command_type: str, args: dict) -> dict:
+    """Execute a command via the Todoist Sync API v1."""
+    command = {
+        "type": command_type,
+        "uuid": str(uuid.uuid4()),
+        "args": args,
+    }
+    response = requests.post(
+        "https://api.todoist.com/api/v1/sync",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"commands": f"[{__import__('json').dumps(command)}]"},
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 # --- List Command ---
@@ -817,6 +835,130 @@ def next_actions(
         for task in tasks:
             project_name = project_map.get(task.project_id, "")
             print_task(task, show_description=show_description, project_name=project_name)
+
+
+# --- Reorder Command ---
+@app.command()
+def reorder(
+    task_id: str = typer.Argument(..., help="Task ID to reorder"),
+    position: str = typer.Argument(..., help="Target position: 'top', 'bottom', or number (1-based)"),
+    show: bool = typer.Option(False, "--show", "-s", help="Show project tasks after reorder"),
+):
+    """Reorder a task within its project.
+
+    Controls which task is "first" in sequential projects (ending with -),
+    which determines what gets the next_action label from Autodoist.
+
+    Positions:
+        top     - Move to first position (gets next_action in sequential)
+        bottom  - Move to last position
+        N       - Move to position N (1-based)
+
+    Examples:
+        td reorder 12345 top       # Make this the next action
+        td reorder 12345 bottom    # Push to end of list
+        td reorder 12345 2         # Move to second position
+        td reorder 12345 top -s    # Reorder and show new order
+    """
+    api = get_api()
+    token = require_token()
+
+    # Get the task to find its project
+    try:
+        task = api.get_task(task_id)
+    except Exception:
+        console.print(f"[red]Task not found: {task_id}[/red]")
+        raise typer.Exit(1)
+
+    # Get all tasks in the same project to determine order
+    project_tasks = []
+    for page in api.get_tasks(project_id=task.project_id):
+        project_tasks.extend(page)
+
+    # Filter to same level (same parent_id) and sort by current order
+    parent_id = getattr(task, 'parent_id', None)
+    sibling_tasks = [t for t in project_tasks if getattr(t, 'parent_id', None) == parent_id]
+
+    # Sort by child_order (need to fetch via API since SDK might not expose it)
+    # Use requests to get full task data with child_order
+    response = requests.get(
+        f"https://api.todoist.com/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"project_id": task.project_id},
+    )
+    response.raise_for_status()
+    task_data = response.json().get("results", [])
+
+    # Filter siblings and sort
+    sibling_data = [t for t in task_data if t.get("parent_id") == parent_id]
+    sibling_data.sort(key=lambda t: t.get("child_order", 0))
+
+    if not sibling_data:
+        console.print("[red]No tasks found in project[/red]")
+        raise typer.Exit(1)
+
+    # Determine target child_order
+    position_lower = position.lower().strip()
+    if position_lower == "top":
+        # Move to position 1 (before the current first task)
+        target_order = 1
+    elif position_lower == "bottom":
+        # Move after the last task
+        max_order = max(t.get("child_order", 0) for t in sibling_data)
+        target_order = max_order + 1
+    else:
+        try:
+            pos_num = int(position)
+            if pos_num < 1:
+                console.print("[red]Position must be >= 1[/red]")
+                raise typer.Exit(1)
+            # Get the child_order of the task at that position
+            if pos_num == 1:
+                target_order = 1
+            elif pos_num > len(sibling_data):
+                max_order = max(t.get("child_order", 0) for t in sibling_data)
+                target_order = max_order + 1
+            else:
+                # Place at the position of the Nth task
+                target_order = sibling_data[pos_num - 1].get("child_order", pos_num)
+        except ValueError:
+            console.print(f"[red]Invalid position: {position}. Use 'top', 'bottom', or a number.[/red]")
+            raise typer.Exit(1)
+
+    # Execute reorder via Sync API
+    try:
+        result = sync_api_command(
+            token,
+            "item_reorder",
+            {"items": [{"id": task_id, "child_order": target_order}]}
+        )
+        sync_status = result.get("sync_status", {})
+        if all(s == "ok" for s in sync_status.values()):
+            console.print(f"[green]Reordered task to position {position}:[/green] {task.content}")
+        else:
+            console.print(f"[yellow]Reorder may have failed:[/yellow] {sync_status}")
+    except Exception as e:
+        console.print(f"[red]Failed to reorder task: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Optionally show new order
+    if show:
+        console.print(f"\n[bold]New order in project:[/bold]")
+        # Refresh task list
+        response = requests.get(
+            f"https://api.todoist.com/api/v1/tasks",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"project_id": task.project_id},
+        )
+        if response.ok:
+            new_data = response.json().get("results", [])
+            new_siblings = [t for t in new_data if t.get("parent_id") == parent_id]
+            new_siblings.sort(key=lambda t: t.get("child_order", 0))
+            for i, t in enumerate(new_siblings, 1):
+                marker = "→" if t["id"] == task_id else " "
+                labels = t.get("labels", [])
+                next_marker = "⭐" if "next_action" in labels else "  "
+                console.print(f"  {next_marker} {i}. {marker} {t['content'][:60]}")
 
 
 # --- Labels Command ---
