@@ -8,9 +8,10 @@ Follows Autodoist conventions for identifying GTD projects (- or = suffix).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import TYPE_CHECKING
+from datetime import date
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from rich.table import Table
 from rich.text import Text
@@ -24,6 +25,27 @@ if TYPE_CHECKING:
 # GTD suffix pattern: 1-3 trailing characters of - or =
 # Matches Autodoist conventions for sequential (-) and parallel (=) projects
 GTD_SUFFIX_PATTERN = re.compile(r"[-=]{1,3}$")
+
+T = TypeVar("T")
+
+
+def _flatten_pages(maybe_pages: Iterable[Any]) -> list[T]:
+    """
+    Flatten API results that may be paginated or flat.
+
+    The Todoist SDK may return either:
+    - An iterator of pages (list of items)
+    - An iterator of items directly
+
+    This helper handles both cases safely.
+    """
+    out: list[T] = []
+    for chunk in maybe_pages:
+        if isinstance(chunk, list):
+            out.extend(chunk)
+        else:
+            out.append(chunk)
+    return out
 
 
 @dataclass
@@ -166,10 +188,8 @@ def run_audit(
     Returns:
         AuditResult containing all audit data and computed health score.
     """
-    # Fetch all projects (paginated)
-    projects: list[Project] = []
-    for page in api.get_projects():
-        projects.extend(page)
+    # Fetch all projects (handles both paginated and flat SDK responses)
+    projects: list[Project] = _flatten_pages(api.get_projects())
 
     # Build project name lookup
     project_name_by_id: dict[str, str] = {p.id: p.name for p in projects}
@@ -180,10 +200,8 @@ def run_audit(
         if is_gtd_project(project.name):
             gtd_project_ids.add(project.id)
 
-    # Fetch all tasks (paginated)
-    all_tasks: list[Task] = []
-    for page in api.get_tasks():
-        all_tasks.extend(page)
+    # Fetch all tasks (handles both paginated and flat SDK responses)
+    all_tasks: list[Task] = _flatten_pages(api.get_tasks())
 
     # Group tasks by project_id (for GTD projects only)
     tasks_by_project: dict[str, list[Task]] = {pid: [] for pid in gtd_project_ids}
@@ -199,7 +217,7 @@ def run_audit(
 
     for pid in gtd_project_ids:
         tasks = tasks_by_project[pid]
-        has_next = any(label_name in task.labels for task in tasks)
+        has_next = any(label_name in (task.labels or []) for task in tasks)
 
         project_info = ProjectInfo(
             id=pid,
@@ -225,11 +243,22 @@ def run_audit(
     stale_tasks: list[TaskInfo] = []
 
     for task in all_tasks:
-        if label_name in task.labels:
+        labels = task.labels or []
+        if label_name in labels:
             # Parse created_at to compute staleness
             # created_at is ISO format like "2024-01-15T10:30:00Z"
-            created_date_str = task.created_at[:10]
-            created_date = date.fromisoformat(created_date_str)
+            created_at = getattr(task, "created_at", None)
+            if not created_at or len(created_at) < 10:
+                # Skip tasks with missing/invalid created_at
+                continue
+
+            try:
+                created_date_str = created_at[:10]
+                created_date = date.fromisoformat(created_date_str)
+            except ValueError:
+                # Skip tasks with unparseable dates
+                continue
+
             days_since_created = (today - created_date).days
 
             task_info = TaskInfo(
@@ -315,11 +344,14 @@ def print_audit(result: AuditResult, stale_days: int, console: Console) -> None:
 
     # Statistics
     console.print(f"[dim]GTD Projects:[/dim] {len(result.gtd_projects)}")
-    console.print(
-        f"[dim]With Next Actions:[/dim] {len(result.projects_with_next)} "
-        f"[dim]([green]{len(result.projects_with_next)}[/green]/"
-        f"{len(result.gtd_projects)})[/dim]"
-    )
+    if len(result.gtd_projects) > 0:
+        console.print(
+            f"[dim]With Next Actions:[/dim] {len(result.projects_with_next)} "
+            f"[dim]([green]{len(result.projects_with_next)}[/green]/"
+            f"{len(result.gtd_projects)})[/dim]"
+        )
+    else:
+        console.print("[dim]With Next Actions:[/dim] n/a (no GTD projects)")
     console.print(f"[dim]Total Next Actions:[/dim] {len(result.next_action_tasks)}")
     console.print(
         f"[dim]Stale (>{stale_days} days):[/dim] {len(result.stale_tasks)}"

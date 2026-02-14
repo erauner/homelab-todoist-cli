@@ -1017,7 +1017,11 @@ def audit(
     - 30% weight: task freshness (next actions not stale)
     """
     api = get_api()
-    result = run_audit(api, label_name, stale)
+    try:
+        result = run_audit(api, label_name, stale)
+    except Exception as e:
+        console.print(f"[red]Audit failed:[/red] {e}")
+        raise typer.Exit(1)
     print_audit(result, stale, console)
 
 
