@@ -19,6 +19,7 @@ from .formatting import (
     print_task_detail,
     console,
 )
+from .audit import run_audit, print_audit
 
 app = typer.Typer(
     name="td",
@@ -994,6 +995,34 @@ def config(
         return
 
     console.print("Use --token to set token or --show to view config")
+
+
+# --- Audit ---
+@app.command()
+def audit(
+    stale: int = typer.Option(
+        14, "--stale", "-s", help="Days before a next action is considered stale"
+    ),
+    label_name: str = typer.Option(
+        "next_action", "--label", "-l", help="Label name for next actions"
+    ),
+):
+    """Audit GTD project health.
+
+    Checks for projects without next actions and stale next action tasks.
+    GTD projects are identified by Autodoist-style suffixes (- or =).
+
+    The health score is computed as:
+    - 70% weight: project coverage (GTD projects with next actions)
+    - 30% weight: task freshness (next actions not stale)
+    """
+    api = get_api()
+    try:
+        result = run_audit(api, label_name, stale)
+    except Exception as e:
+        console.print(f"[red]Audit failed:[/red] {e}")
+        raise typer.Exit(1)
+    print_audit(result, stale, console)
 
 
 # --- Version ---
