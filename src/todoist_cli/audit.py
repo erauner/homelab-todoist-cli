@@ -33,7 +33,7 @@ class TaskInfo:
     id: str
     content: str
     project_name: str
-    days_stale: int
+    age_days: int  # Days since task was created
     created_at: str
 
 
@@ -65,7 +65,7 @@ def is_gtd_project(name: str) -> bool:
     GTD projects are identified by Autodoist-style suffixes:
     - Sequential projects end with '-' (or up to 3: '--', '---')
     - Parallel projects end with '=' (or up to 3: '==', '===')
-    - Mixed suffixes are also valid (e.g., '=-=')
+    - Only homogeneous suffixes are recognized (not mixed like '=-')
 
     Args:
         name: The project name to check.
@@ -79,8 +79,8 @@ def is_gtd_project(name: str) -> bool:
 
 
 def compute_health_score(
-    gtd_projects: list[ProjectInfo],
     projects_with_next: list[ProjectInfo],
+    projects_without_next: list[ProjectInfo],
     next_action_tasks: list[TaskInfo],
     stale_tasks: list[TaskInfo],
 ) -> int:
@@ -92,12 +92,15 @@ def compute_health_score(
     - 30% weight: task freshness (next actions that are not stale)
 
     Edge cases:
-    - Zero GTD projects: project_score = 1.0 (nothing to audit)
+    - Zero actionable GTD projects (all empty): project_score = 1.0 (nothing to audit)
     - Zero next actions: freshness_score = 1.0 (nothing stale)
 
+    Note: Empty projects (no tasks) are excluded from coverage calculation since
+    they are containers, not actionable items requiring a next action.
+
     Args:
-        gtd_projects: All GTD projects.
         projects_with_next: GTD projects that have at least one next action.
+        projects_without_next: GTD projects with tasks but no next action label.
         next_action_tasks: All tasks with the next action label.
         stale_tasks: Next action tasks older than the staleness threshold.
 
@@ -105,10 +108,12 @@ def compute_health_score(
         Health score from 0 to 100.
     """
     # 70% weight: project coverage
-    if len(gtd_projects) > 0:
-        project_score = len(projects_with_next) / len(gtd_projects)
+    # Use actionable projects (non-empty) as denominator — empty projects are containers
+    actionable_projects = len(projects_with_next) + len(projects_without_next)
+    if actionable_projects > 0:
+        project_score = len(projects_with_next) / actionable_projects
     else:
-        project_score = 1.0  # No GTD projects = nothing to audit
+        project_score = 1.0  # No actionable GTD projects = nothing to audit
 
     # 30% weight: task freshness
     if len(next_action_tasks) > 0:
@@ -195,7 +200,6 @@ def run_audit(
     gtd_projects: list[ProjectInfo] = []
     projects_with_next: list[ProjectInfo] = []
     projects_without_next: list[ProjectInfo] = []
-    project_ids_with_next: set[str] = set()
 
     for pid in gtd_project_ids:
         tasks = tasks_by_project[pid]
@@ -210,7 +214,6 @@ def run_audit(
 
         if has_next:
             projects_with_next.append(project_info)
-            project_ids_with_next.add(pid)
         elif len(tasks) > 0:
             # Only flag non-empty projects as "missing next action"
             # Empty projects are containers, not actionable items
@@ -249,7 +252,7 @@ def run_audit(
                 id=task.id,
                 content=task.content,
                 project_name=project_name_by_id.get(task.project_id, "Unknown"),
-                days_stale=days_since_created,
+                age_days=days_since_created,
                 created_at=created_date_str,
             )
             next_action_tasks.append(task_info)
@@ -258,12 +261,12 @@ def run_audit(
                 stale_tasks.append(task_info)
 
     # Sort stale tasks by staleness (most stale first)
-    stale_tasks.sort(key=lambda t: t.days_stale, reverse=True)
+    stale_tasks.sort(key=lambda t: t.age_days, reverse=True)
 
     # Compute health score
     health_score = compute_health_score(
-        gtd_projects,
         projects_with_next,
+        projects_without_next,
         next_action_tasks,
         stale_tasks,
     )
@@ -327,18 +330,26 @@ def print_audit(result: AuditResult, stale_days: int, console: Console) -> None:
     console.print()
 
     # Statistics
-    console.print(f"[dim]GTD Projects:[/dim] {len(result.gtd_projects)}")
-    if len(result.gtd_projects) > 0:
+    # Actionable = non-empty projects (with_next + without_next)
+    actionable = len(result.projects_with_next) + len(result.projects_without_next)
+    empty_count = len(result.gtd_projects) - actionable
+
+    projects_line = f"[dim]GTD Projects:[/dim] {len(result.gtd_projects)}"
+    if empty_count > 0:
+        projects_line += f" [dim]({empty_count} empty)[/dim]"
+    console.print(projects_line)
+
+    if actionable > 0:
         console.print(
             f"[dim]With Next Actions:[/dim] {len(result.projects_with_next)} "
             f"[dim]([green]{len(result.projects_with_next)}[/green]/"
-            f"{len(result.gtd_projects)})[/dim]"
+            f"{actionable} actionable)[/dim]"
         )
     else:
-        console.print("[dim]With Next Actions:[/dim] n/a (no GTD projects)")
+        console.print("[dim]With Next Actions:[/dim] n/a (no actionable projects)")
     console.print(f"[dim]Total Next Actions:[/dim] {len(result.next_action_tasks)}")
     console.print(
-        f"[dim]Stale (≥{stale_days} days):[/dim] {len(result.stale_tasks)}"
+        f"[dim]Stale (>={stale_days} days):[/dim] {len(result.stale_tasks)}"
     )
 
     # Projects without next actions (only if there are any)
@@ -382,7 +393,7 @@ def print_audit(result: AuditResult, stale_days: int, console: Console) -> None:
             table.add_row(
                 content,
                 task.project_name,
-                f"{task.days_stale}d",
+                f"{task.age_days}d",
             )
 
         console.print(table)
