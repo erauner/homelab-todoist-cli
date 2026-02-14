@@ -8,10 +8,9 @@ Follows Autodoist conventions for identifying GTD projects (- or = suffix).
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING
 
 from rich.table import Table
 from rich.text import Text
@@ -22,30 +21,9 @@ if TYPE_CHECKING:
     from todoist_api_python.models import Project, Task
 
 
-# GTD suffix pattern: 1-3 trailing characters of - or =
+# GTD suffix pattern: 1-3 trailing characters of homogeneous - or =
 # Matches Autodoist conventions for sequential (-) and parallel (=) projects
-GTD_SUFFIX_PATTERN = re.compile(r"[-=]{1,3}$")
-
-T = TypeVar("T")
-
-
-def _flatten_pages(maybe_pages: Iterable[Any]) -> list[T]:
-    """
-    Flatten API results that may be paginated or flat.
-
-    The Todoist SDK may return either:
-    - An iterator of pages (list of items)
-    - An iterator of items directly
-
-    This helper handles both cases safely.
-    """
-    out: list[T] = []
-    for chunk in maybe_pages:
-        if isinstance(chunk, list):
-            out.extend(chunk)
-        else:
-            out.append(chunk)
-    return out
+GTD_SUFFIX_PATTERN = re.compile(r"(-{1,3}|={1,3})$")
 
 
 @dataclass
@@ -138,7 +116,7 @@ def compute_health_score(
     else:
         freshness_score = 1.0  # No next actions = nothing stale
 
-    return int(project_score * 70 + freshness_score * 30)
+    return round(project_score * 70 + freshness_score * 30)
 
 
 def format_score_label(score: int) -> str:
@@ -188,8 +166,10 @@ def run_audit(
     Returns:
         AuditResult containing all audit data and computed health score.
     """
-    # Fetch all projects (handles both paginated and flat SDK responses)
-    projects: list[Project] = _flatten_pages(api.get_projects())
+    # Fetch all projects (paginated)
+    projects: list[Project] = []
+    for page in api.get_projects():
+        projects.extend(page)
 
     # Build project name lookup
     project_name_by_id: dict[str, str] = {p.id: p.name for p in projects}
@@ -200,8 +180,10 @@ def run_audit(
         if is_gtd_project(project.name):
             gtd_project_ids.add(project.id)
 
-    # Fetch all tasks (handles both paginated and flat SDK responses)
-    all_tasks: list[Task] = _flatten_pages(api.get_tasks())
+    # Fetch all tasks (paginated)
+    all_tasks: list[Task] = []
+    for page in api.get_tasks():
+        all_tasks.extend(page)
 
     # Group tasks by project_id (for GTD projects only)
     tasks_by_project: dict[str, list[Task]] = {pid: [] for pid in gtd_project_ids}
@@ -229,7 +211,9 @@ def run_audit(
         if has_next:
             projects_with_next.append(project_info)
             project_ids_with_next.add(pid)
-        else:
+        elif len(tasks) > 0:
+            # Only flag non-empty projects as "missing next action"
+            # Empty projects are containers, not actionable items
             projects_without_next.append(project_info)
 
     # Sort projects by name for consistent output
@@ -270,7 +254,7 @@ def run_audit(
             )
             next_action_tasks.append(task_info)
 
-            if days_since_created > stale_days:
+            if days_since_created >= stale_days:
                 stale_tasks.append(task_info)
 
     # Sort stale tasks by staleness (most stale first)
@@ -354,7 +338,7 @@ def print_audit(result: AuditResult, stale_days: int, console: Console) -> None:
         console.print("[dim]With Next Actions:[/dim] n/a (no GTD projects)")
     console.print(f"[dim]Total Next Actions:[/dim] {len(result.next_action_tasks)}")
     console.print(
-        f"[dim]Stale (>{stale_days} days):[/dim] {len(result.stale_tasks)}"
+        f"[dim]Stale (≥{stale_days} days):[/dim] {len(result.stale_tasks)}"
     )
 
     # Projects without next actions (only if there are any)
@@ -369,11 +353,7 @@ def print_audit(result: AuditResult, stale_days: int, console: Console) -> None:
         table.add_column("Status", justify="center")
 
         for project in result.projects_without_next:
-            if project.task_count > 0:
-                status = f"[yellow]{project.task_count} task(s), none labeled[/yellow]"
-            else:
-                status = "[dim]Empty project[/dim]"
-
+            status = f"[yellow]{project.task_count} task(s), none labeled[/yellow]"
             table.add_row(
                 project.name,
                 str(project.task_count),
