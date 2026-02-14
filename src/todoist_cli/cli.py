@@ -20,6 +20,7 @@ from .formatting import (
     console,
 )
 from .audit import run_audit, print_audit
+from .todoist import TodoistClient, collect_pages
 
 app = typer.Typer(
     name="td",
@@ -33,12 +34,23 @@ def get_api() -> TodoistAPI:
     return TodoistAPI(require_token())
 
 
-def get_project_map(api: TodoistAPI) -> dict[str, str]:
+def get_client() -> TodoistClient:
+    """Get Todoist client facade."""
+    token = require_token()
+    return TodoistClient(token=token, api=TodoistAPI(token))
+
+
+def get_project_map(api: Optional[TodoistAPI] = None, client: Optional[TodoistClient] = None) -> dict[str, str]:
     """Get mapping of project ID to name."""
+    if client is not None:
+        projects = client.list_projects()
+    else:
+        api = api or get_api()
+        projects = collect_pages(api.get_projects())
+
     result = {}
-    for page in api.get_projects():
-        for p in page:
-            result[p.id] = p.name
+    for p in projects:
+        result[p.id] = p.name
     return result
 
 
@@ -68,8 +80,8 @@ def list(
     show_description: bool = typer.Option(False, "--description", "-d", help="Show task descriptions"),
 ):
     """List tasks with optional filtering."""
-    api = get_api()
-    project_map = get_project_map(api)
+    client = get_client()
+    project_map = get_project_map(client=client)
 
     # Build kwargs for get_tasks
     kwargs = {}
@@ -89,10 +101,7 @@ def list(
     if label:
         kwargs["label"] = label
 
-    # Flatten paginated results
-    tasks = []
-    for page in api.get_tasks(**kwargs):
-        tasks.extend(page)
+    tasks = client.list_tasks(**kwargs)
 
     if priority:
         tasks = sorted(tasks, key=lambda t: -t.priority)
