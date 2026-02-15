@@ -220,6 +220,41 @@ class TestAdd:
         assert call_kwargs["project_id"] == "proj1"
 
 
+class TestQuery:
+    """Tests for query command."""
+
+    def test_query_json(self, mock_token):
+        mock_client = MagicMock()
+        mock_client.list_tasks_by_filter.return_value = [
+            {"id": "1", "content": "Task 1", "priority": 1, "due": None},
+            {"id": "2", "content": "Task 2", "priority": 2, "due": {"date": "2026-02-15"}},
+        ]
+
+        with patch("todoist_cli.cli.get_client", return_value=mock_client):
+            result = runner.invoke(app, ["query", "today", "--json"])
+
+        assert result.exit_code == 0
+        assert "\"content\": \"Task 1\"" in result.output
+        assert "\"content\": \"Task 2\"" in result.output
+        mock_client.list_tasks_by_filter.assert_called_once_with("today")
+
+    def test_query_limit(self, mock_token):
+        mock_client = MagicMock()
+        mock_client.list_tasks_by_filter.return_value = [
+            {"id": "1", "content": "Task 1", "priority": 1},
+            {"id": "2", "content": "Task 2", "priority": 1},
+            {"id": "3", "content": "Task 3", "priority": 1},
+        ]
+
+        with patch("todoist_cli.cli.get_client", return_value=mock_client):
+            result = runner.invoke(app, ["query", "today", "--limit", "2"])
+
+        assert result.exit_code == 0
+        assert "Task 1" in result.output
+        assert "Task 2" in result.output
+        assert "Task 3" not in result.output
+
+
 class TestShow:
     """Tests for show command."""
 

@@ -12,6 +12,7 @@ from . import __version__
 from .config import require_token, get_config, save_config
 from .formatting import (
     print_task,
+    print_rest_task,
     print_tasks_table,
     print_projects,
     print_labels,
@@ -116,6 +117,34 @@ def list(
         for task in tasks:
             project_name = project_map.get(task.project_id, "")
             print_task(task, show_description=show_description, project_name=project_name)
+
+
+# --- Query Command ---
+@app.command()
+def query(
+    filter_query: str = typer.Argument(..., help="Native Todoist filter query (e.g. '(today | overdue) & #Work')"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Max number of tasks to show (client-side)"),
+    json_output: bool = typer.Option(False, "--json", help="Print raw REST JSON to stdout"),
+):
+    """Query tasks using native Todoist filter syntax (REST v2 tasks?filter=...)."""
+    import json as _json
+
+    client = get_client()
+    tasks = client.list_tasks_by_filter(filter_query)
+
+    if limit is not None and limit >= 0:
+        tasks = tasks[:limit]
+
+    if json_output:
+        typer.echo(_json.dumps(tasks, indent=2, sort_keys=True))
+        return
+
+    if not tasks:
+        console.print("[dim]No tasks found[/dim]")
+        return
+
+    for task in tasks:
+        print_rest_task(task)
 
 
 # --- Add Command ---

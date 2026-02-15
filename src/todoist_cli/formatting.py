@@ -91,6 +91,34 @@ def print_task(task: Task, show_description: bool = False, project_name: str | N
         console.print(f"    [dim]{task.description}[/dim]")
 
 
+def _due_string_from_rest_task(task: dict) -> str:
+    due = task.get("due")
+    if not due:
+        return ""
+    if isinstance(due, dict):
+        # REST v2: due has "date" and/or "datetime"
+        return due.get("datetime") or due.get("date") or ""
+    return str(due)
+
+
+def print_rest_task(task: dict) -> None:
+    """Print a single REST-v2 task dict in a compact, human-readable format."""
+    task_id = str(task.get("id", ""))
+    content = str(task.get("content", ""))
+    priority = task.get("priority")
+    due_str = _due_string_from_rest_task(task)
+
+    meta_parts: list[str] = []
+    if isinstance(priority, int):
+        meta_parts.append(f"p{priority}")
+    if due_str:
+        meta_parts.append(f"due: {due_str}")
+
+    meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
+    # The output includes square brackets which Rich would treat as markup.
+    console.print(f"- [{task_id}] {content}{meta}", markup=False)
+
+
 def print_tasks_table(tasks: list[Task], projects: dict[str, str] | None = None) -> None:
     """Print tasks in a table format."""
     table = Table(show_header=True, header_style="bold")

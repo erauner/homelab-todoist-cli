@@ -5,7 +5,7 @@ A full-featured command-line interface for Todoist with support for descriptions
 ## Features
 
 - **Full API support**: descriptions, comments, labels, priorities
-- **Filtering**: Use Todoist filter syntax (`today`, `overdue`, `p1`, etc.)
+- **Filtering**: Use native Todoist filter syntax via `td query` (`today`, `overdue`, boolean ops, etc.)
 - **Rich output**: Colored terminal output with table formatting
 - **Compatible config**: Uses same config location as `sachaos/todoist`
 
@@ -52,8 +52,24 @@ td list -d                       # Show descriptions
 td list --priority               # Sort by priority
 ```
 
-> **Note:** The REST API doesn't support Todoist filter syntax (`today`, `overdue`, etc.).
-> Use `--project` and `--label` for filtering, or fetch all and pipe to grep.
+> **Note:** `td list` uses the standard tasks endpoint and supports project/label filtering only.
+> For native Todoist filter syntax (e.g. `today`, `overdue`, `p1`, boolean logic), use `td query`.
+
+### Query tasks (native Todoist filter syntax)
+
+`td query` calls `GET /rest/v2/tasks?filter=...` so you can use Todoist's full filter language.
+
+```bash
+td query "today"                                # Tasks due today
+td query "overdue"                              # Overdue tasks
+td query "(today | overdue) & #Work"            # Boolean logic + project
+td query "@urgent & !#Someday"                  # Label + NOT project
+td query "#Personal & (tomorrow | next 7 days)" # Project + date ranges
+td query "today, overdue"                       # Comma sections (Todoist filter sections)
+
+td query "(today | overdue) & #Work" --limit 25
+td query "@urgent & (p1 | p2)" --json
+```
 
 ### Add tasks
 
@@ -111,7 +127,7 @@ td labels                   # List all labels
 | Labels            |       ✅         |      ✅       |
 | **Description**   |       ❌         |      ✅       |
 | **Comments**      |       ❌         |      ✅       |
-| Filter syntax     |       ✅         |      ❌       |
+| Filter syntax     |       ✅         |      ✅       |
 | Project/label filter |    ✅         |      ✅       |
 | Rich output       |       ✅         |      ✅       |
 
