@@ -32,13 +32,13 @@ def test_todoist_client_list_projects_and_tasks_are_flattened():
     api.get_tasks.assert_called_once_with(project_id="p2")
 
 
-def test_list_tasks_by_filter_calls_rest_with_params_and_auth_header():
+def test_list_tasks_by_filter_calls_api_v1_with_params_and_auth_header():
     api = MagicMock()
     client = TodoistClient(token="test_token", api=api)
 
     with patch("todoist_cli.todoist.client.requests.get") as get:
         resp = MagicMock()
-        resp.json.return_value = [{"id": "1", "content": "One"}]
+        resp.json.return_value = {"results": [{"id": "1", "content": "One"}], "next_cursor": None}
         resp.raise_for_status.return_value = None
         get.return_value = resp
 
@@ -47,5 +47,6 @@ def test_list_tasks_by_filter_calls_rest_with_params_and_auth_header():
         assert tasks == [{"id": "1", "content": "One"}]
         get.assert_called_once()
         call_kwargs = get.call_args.kwargs
-        assert call_kwargs["params"] == {"filter": "(today | overdue) & #Work"}
+        assert call_kwargs["params"]["query"] == "(today | overdue) & #Work"
+        assert call_kwargs["params"]["limit"] == 200
         assert call_kwargs["headers"] == {"Authorization": "Bearer test_token"}
