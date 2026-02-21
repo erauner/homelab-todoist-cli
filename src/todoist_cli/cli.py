@@ -169,6 +169,7 @@ def add(
     content: str = typer.Argument(..., help="Task content"),
     description: Optional[str] = typer.Option(None, "--description", "-d", help="Task description"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project name"),
+    parent_id: Optional[str] = typer.Option(None, "--parent-id", "--parent", help="Parent task ID (create as subtask)"),
     priority: int = typer.Option(1, "--priority", "-P", help="Priority (1=p4 lowest, 4=p1 highest)"),
     due: Optional[str] = typer.Option(None, "--due", "--do", "-D", help="Do date - when to work on it (e.g., 'today', 'tomorrow', 'wednesday')"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="Hard deadline date (YYYY-MM-DD format)"),
@@ -198,6 +199,9 @@ def add(
         else:
             console.print(f"[red]Project '{project}' not found[/red]")
             raise typer.Exit(1)
+
+    if parent_id:
+        kwargs["parent_id"] = parent_id
 
     if due:
         kwargs["due_string"] = due
@@ -237,6 +241,7 @@ def add_focus(
     content: str = typer.Argument(..., help="Task content"),
     description: Optional[str] = typer.Option(None, "--description", "-d", help="Task description"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project name"),
+    parent_id: Optional[str] = typer.Option(None, "--parent-id", "--parent", help="Parent task ID (create as subtask)"),
     priority: int = typer.Option(1, "--priority", "-P", help="Priority (1=p4 lowest, 4=p1 highest)"),
     due: Optional[str] = typer.Option(None, "--due", "--do", "-D", help="Do date - when to work on it (e.g., 'today', 'tomorrow', 'wednesday')"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="Hard deadline date (YYYY-MM-DD format)"),
@@ -266,6 +271,9 @@ def add_focus(
         else:
             console.print(f"[red]Project '{project}' not found[/red]")
             raise typer.Exit(1)
+
+    if parent_id:
+        kwargs["parent_id"] = parent_id
 
     if due:
         kwargs["due_string"] = due

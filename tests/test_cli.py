@@ -232,6 +232,15 @@ class TestAdd:
         call_kwargs = mock_api.add_task.call_args[1]
         assert call_kwargs["project_id"] == "proj1"
 
+    def test_add_with_parent_id_creates_subtask(self, mock_api, mock_token):
+        """Add passes parent_id so task is created as subtask."""
+        mock_api.add_task.return_value = make_mock_task(content="Subtask")
+
+        result = runner.invoke(app, ["add", "Subtask", "--parent-id", "parent123"])
+        assert result.exit_code == 0
+        call_kwargs = mock_api.add_task.call_args[1]
+        assert call_kwargs["parent_id"] == "parent123"
+
     def test_add_focus_sets_focus_winner(self, mock_api, mock_token):
         """add-focus creates task and applies make_winner action."""
         mock_api.add_task.return_value = make_mock_task(id="new123", content="Focus task")
@@ -283,6 +292,24 @@ class TestAdd:
         assert result.exit_code == 0
         call_kwargs = mock_api.add_task.call_args[1]
         assert call_kwargs["description"] == "Do this right away"
+
+    def test_add_focus_with_parent_id_creates_subtask(self, mock_api, mock_token):
+        """add-focus passes parent_id so focused task can be a subtask."""
+        mock_api.add_task.return_value = make_mock_task(id="new123", content="Focus subtask")
+        mock_auto = MagicMock()
+        mock_auto.task_label_action.return_value = {
+            "ok": True,
+            "action": "make_winner",
+            "task_id": "new123",
+            "message": "Task new123 is now focus winner.",
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_auto):
+            result = runner.invoke(app, ["add-focus", "Focus subtask", "--parent-id", "parent123"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_api.add_task.call_args[1]
+        assert call_kwargs["parent_id"] == "parent123"
 
 
 class TestQuery:
