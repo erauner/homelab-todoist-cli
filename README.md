@@ -85,6 +85,7 @@ td add "Buy groceries"
 td add "Write report" --due "tomorrow" --priority 4
 td add "Research topic" --description "Look into X, Y, Z" --project "Work"
 td add "Call mom" --labels "personal,phone" --due "today 5pm"
+td add-focus "Handle prod incident" --priority 4   # Create and set as @focus immediately
 ```
 
 ### Quick add (natural language)

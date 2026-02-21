@@ -224,6 +224,79 @@ def add(
         console.print(f"[dim]Duration: {task.duration.amount} {task.duration.unit}(s)[/dim]")
 
 
+@app.command(name="add-focus")
+def add_focus(
+    content: str = typer.Argument(..., help="Task content"),
+    description: Optional[str] = typer.Option(None, "--description", "-d", help="Task description"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project name"),
+    priority: int = typer.Option(1, "--priority", "-P", help="Priority (1=p4 lowest, 4=p1 highest)"),
+    due: Optional[str] = typer.Option(None, "--due", "--do", "-D", help="Do date - when to work on it (e.g., 'today', 'tomorrow', 'wednesday')"),
+    deadline: Optional[str] = typer.Option(None, "--deadline", help="Hard deadline date (YYYY-MM-DD format)"),
+    duration: Optional[int] = typer.Option(None, "--duration", help="Task duration amount"),
+    duration_unit: Optional[str] = typer.Option(None, "--duration-unit", help="Duration unit: 'minute' or 'day'"),
+    labels: Optional[str] = typer.Option(None, "--labels", "-l", help="Labels (comma-separated)"),
+):
+    """Add a new task and immediately set it as singleton focus."""
+    api = get_api()
+
+    kwargs = {"content": content, "priority": priority}
+
+    if description:
+        kwargs["description"] = description
+
+    if project:
+        project_map = get_project_map(api)
+        project_id = None
+        for pid, pname in project_map.items():
+            if pname.lower() == project.lower():
+                project_id = pid
+                break
+        if project_id:
+            kwargs["project_id"] = project_id
+        else:
+            console.print(f"[red]Project '{project}' not found[/red]")
+            raise typer.Exit(1)
+
+    if due:
+        kwargs["due_string"] = due
+
+    if deadline:
+        try:
+            kwargs["deadline_date"] = datetime.strptime(deadline, "%Y-%m-%d").date()
+        except ValueError:
+            console.print("[red]Invalid deadline format. Use YYYY-MM-DD (e.g., 2025-02-15)[/red]")
+            raise typer.Exit(1)
+
+    if duration is not None or duration_unit is not None:
+        if duration is None or duration_unit is None:
+            console.print("[red]Both --duration and --duration-unit must be specified together[/red]")
+            raise typer.Exit(1)
+        if duration_unit not in ("minute", "day"):
+            console.print("[red]Duration unit must be 'minute' or 'day'[/red]")
+            raise typer.Exit(1)
+        kwargs["duration"] = duration
+        kwargs["duration_unit"] = duration_unit
+
+    if labels:
+        kwargs["labels"] = [label_name.strip() for label_name in labels.split(",")]
+
+    task = api.add_task(**kwargs)
+    console.print(f"[green]Created task:[/green] {task.id} - {task.content}")
+
+    client = get_autodoist_client()
+    try:
+        focus_result = client.task_label_action(task_id=task.id, action="make_winner")
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to set focus for new task:[/red] {exc}")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Set focus:[/green] {task.id}")
+    if focus_result.get("message"):
+        console.print(f"[dim]{focus_result['message']}[/dim]")
+    if task.url:
+        console.print(f"[bold]URL:[/bold] {task.url}")
+
+
 # --- Quick Add Command ---
 @app.command()
 def quick(

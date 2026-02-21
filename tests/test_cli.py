@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 import pytest
 
 from todoist_cli.cli import app
+from todoist_cli.autodoist import AutodoistClientError
 
 
 runner = CliRunner()
@@ -218,6 +219,37 @@ class TestAdd:
         assert result.exit_code == 0
         call_kwargs = mock_api.add_task.call_args[1]
         assert call_kwargs["project_id"] == "proj1"
+
+    def test_add_focus_sets_focus_winner(self, mock_api, mock_token):
+        """add-focus creates task and applies make_winner action."""
+        mock_api.add_task.return_value = make_mock_task(id="new123", content="Focus task")
+        mock_auto = MagicMock()
+        mock_auto.task_label_action.return_value = {
+            "ok": True,
+            "action": "make_winner",
+            "task_id": "new123",
+            "message": "Task new123 is now focus winner.",
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_auto):
+            result = runner.invoke(app, ["add-focus", "Focus task"])
+
+        assert result.exit_code == 0
+        assert "Created task" in result.output
+        assert "Set focus" in result.output
+        mock_auto.task_label_action.assert_called_once_with(task_id="new123", action="make_winner")
+
+    def test_add_focus_fails_when_focus_action_fails(self, mock_api, mock_token):
+        """add-focus exits non-zero when focus action fails."""
+        mock_api.add_task.return_value = make_mock_task(id="new123", content="Focus task")
+        mock_auto = MagicMock()
+        mock_auto.task_label_action.side_effect = AutodoistClientError("boom")
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_auto):
+            result = runner.invoke(app, ["add-focus", "Focus task"])
+
+        assert result.exit_code == 1
+        assert "Failed to set focus for new task" in result.output
 
 
 class TestQuery:
