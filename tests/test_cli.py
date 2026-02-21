@@ -863,3 +863,96 @@ class TestRecent:
         assert "Task 1" in result.output
         assert "Task 2" in result.output
         assert "Task 3" not in result.output
+
+
+class TestAutodoist:
+    """Tests for autodoist command group."""
+
+    def test_autodoist_health(self):
+        mock_client = MagicMock()
+        mock_client.health.return_value = {"ok": True, "generated_at": "2026-01-01T00:00:00Z"}
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "health"])
+
+        assert result.exit_code == 0
+        assert "ok" in result.output
+        mock_client.health.assert_called_once_with()
+
+    def test_autodoist_state(self):
+        mock_client = MagicMock()
+        mock_client.state.return_value = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "summary": {
+                "open_tasks": 10,
+                "next_action_count": 2,
+                "doing_now_count": 1,
+                "doing_now_conflicts": 0,
+            },
+            "labels": {"next_action_label": "next_action", "doing_now_label": "doing_now"},
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "state"])
+
+        assert result.exit_code == 0
+        assert "open_tasks: 10" in result.output
+        assert "doing_now: 1" in result.output
+        mock_client.state.assert_called_once_with()
+
+    def test_autodoist_tasks(self):
+        mock_client = MagicMock()
+        mock_client.tasks.return_value = {
+            "tasks": [
+                {"id": "1", "content": "First", "labels": ["doing_now"], "updated_at": "2026-01-01T00:00:00Z"},
+            ]
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "tasks", "--label", "doing_now"])
+
+        assert result.exit_code == 0
+        assert "First" in result.output
+        mock_client.tasks.assert_called_once_with(label="doing_now", contains=None)
+
+    def test_autodoist_doing_now_apply(self):
+        mock_client = MagicMock()
+        mock_client.reconcile_doing_now.return_value = {
+            "applied": True,
+            "winner_task_id": "task-2",
+            "removed_count": 1,
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "doing-now", "--apply"])
+
+        assert result.exit_code == 0
+        assert "winner_task_id: task-2" in result.output
+        mock_client.reconcile_doing_now.assert_called_once_with(apply=True, winner_task_id=None)
+
+    def test_autodoist_set_doing_now(self):
+        mock_client = MagicMock()
+        mock_client.reconcile_doing_now.return_value = {
+            "applied": True,
+            "winner_task_id": "task-3",
+            "removed_count": 2,
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "set-doing-now", "task-3"])
+
+        assert result.exit_code == 0
+        assert "winner_task_id: task-3" in result.output
+        mock_client.reconcile_doing_now.assert_called_once_with(apply=True, winner_task_id="task-3")
+
+
+class TestConfigCommand:
+    """Tests for config command options."""
+
+    def test_config_set_autodoist_url(self):
+        with patch("todoist_cli.cli.get_config", return_value={}), patch("todoist_cli.cli.save_config") as save:
+            result = runner.invoke(app, ["config", "--autodoist-url", "https://autodoist.erauner.dev/"])
+
+        assert result.exit_code == 0
+        assert "Autodoist URL saved" in result.output
+        save.assert_called_once_with({"autodoist_url": "https://autodoist.erauner.dev"})

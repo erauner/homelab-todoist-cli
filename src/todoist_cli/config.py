@@ -25,6 +25,17 @@ def get_token() -> str | None:
     return config.get("token")
 
 
+def get_autodoist_url() -> str | None:
+    """Get Autodoist API base URL from config or environment."""
+    if url := os.environ.get("AUTODOIST_URL"):
+        return url.rstrip("/")
+    config = get_config()
+    value = config.get("autodoist_url")
+    if isinstance(value, str):
+        return value.rstrip("/")
+    return None
+
+
 def save_config(config: dict) -> None:
     """Save configuration to config file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)

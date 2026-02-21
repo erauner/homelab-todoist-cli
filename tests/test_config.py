@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from todoist_cli.config import get_token, get_config, save_config
+from todoist_cli.config import get_autodoist_url, get_token, get_config, save_config
 
 
 def test_get_token_from_env(monkeypatch):
@@ -36,6 +36,25 @@ def test_get_token_none(tmp_path, monkeypatch):
     config_file = tmp_path / "nonexistent.json"
     with patch("todoist_cli.config.CONFIG_FILE", config_file):
         assert get_token() is None
+
+
+def test_get_autodoist_url_from_env(monkeypatch):
+    """Autodoist URL from environment takes precedence."""
+    monkeypatch.setenv("AUTODOIST_URL", "https://autodoist.example.com/")
+    assert get_autodoist_url() == "https://autodoist.example.com"
+
+
+def test_get_autodoist_url_from_config(tmp_path, monkeypatch):
+    """Autodoist URL from config file when env not set."""
+    monkeypatch.delenv("AUTODOIST_URL", raising=False)
+
+    config_dir = tmp_path / ".config" / "todoist"
+    config_dir.mkdir(parents=True)
+    config_file = config_dir / "config.json"
+    config_file.write_text(json.dumps({"autodoist_url": "https://autodoist.erauner.dev/"}))
+
+    with patch("todoist_cli.config.CONFIG_FILE", config_file):
+        assert get_autodoist_url() == "https://autodoist.erauner.dev"
 
 
 def test_save_config_creates_file(tmp_path):

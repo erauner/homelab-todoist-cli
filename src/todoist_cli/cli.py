@@ -1,5 +1,6 @@
 """Todoist CLI - Main command-line interface."""
 
+import json
 from datetime import date, datetime, timedelta
 from typing import Optional
 import uuid
@@ -9,7 +10,8 @@ from rich.console import Console
 from todoist_api_python.api import TodoistAPI
 
 from . import __version__
-from .config import require_token, get_config, save_config
+from .autodoist import AutodoistClient, AutodoistClientError
+from .config import get_autodoist_url, require_token, get_config, save_config
 from .formatting import (
     print_task,
     print_rest_task,
@@ -28,6 +30,8 @@ app = typer.Typer(
     help="Todoist CLI - Full-featured command-line interface with description and comment support.",
     no_args_is_help=True,
 )
+autodoist_app = typer.Typer(help="Autodoist debug API helpers.")
+app.add_typer(autodoist_app, name="autodoist")
 
 
 def get_api() -> TodoistAPI:
@@ -39,6 +43,19 @@ def get_client() -> TodoistClient:
     """Get Todoist client facade."""
     token = require_token()
     return TodoistClient(token=token, api=TodoistAPI(token))
+
+
+def get_autodoist_client() -> AutodoistClient:
+    """Get configured Autodoist API client."""
+    url = get_autodoist_url()
+    if not url:
+        raise SystemExit(
+            "No Autodoist URL found.\n\n"
+            "Set it in one of these ways:\n"
+            "  1. Environment variable: export AUTODOIST_URL=https://autodoist.erauner.dev\n"
+            "  2. Config file: td config --autodoist-url https://autodoist.erauner.dev"
+        )
+    return AutodoistClient(base_url=url)
 
 
 def get_project_map(api: Optional[TodoistAPI] = None, client: Optional[TodoistClient] = None) -> dict[str, str]:
@@ -1011,10 +1028,143 @@ def labels():
     print_labels(label_list)
 
 
+# --- Autodoist Commands ---
+@autodoist_app.command("health")
+def autodoist_health(
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """Check Autodoist API health."""
+    client = get_autodoist_client()
+    try:
+        payload = client.health()
+    except AutodoistClientError as exc:
+        console.print(f"[red]Autodoist health check failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    console.print(f"[green]ok[/green] generated_at={payload.get('generated_at', 'n/a')}")
+
+
+@autodoist_app.command("state")
+def autodoist_state(
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """Show Autodoist state summary."""
+    client = get_autodoist_client()
+    try:
+        payload = client.state()
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to fetch Autodoist state:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    summary = payload.get("summary", {})
+    labels = payload.get("labels", {})
+    console.print(f"generated_at: {payload.get('generated_at', 'n/a')}")
+    console.print(f"open_tasks: {summary.get('open_tasks', 0)}")
+    console.print(f"{labels.get('next_action_label', 'next_action')}: {summary.get('next_action_count', 0)}")
+    console.print(f"{labels.get('doing_now_label', 'doing_now')}: {summary.get('doing_now_count', 0)}")
+    console.print(f"doing_now_conflicts: {summary.get('doing_now_conflicts', 0)}")
+
+
+@autodoist_app.command("tasks")
+def autodoist_tasks(
+    label: Optional[str] = typer.Option(None, "--label", "-l", help="Filter by label"),
+    contains: Optional[str] = typer.Option(None, "--contains", "-c", help="Filter content contains"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Limit tasks"),
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """List tasks from Autodoist API state."""
+    client = get_autodoist_client()
+    try:
+        payload = client.tasks(label=label, contains=contains)
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to fetch Autodoist tasks:[/red] {exc}")
+        raise typer.Exit(1)
+
+    tasks = payload.get("tasks", [])
+    if limit is not None and limit >= 0:
+        tasks = tasks[:limit]
+
+    if json_output:
+        out = dict(payload)
+        out["tasks"] = tasks
+        out["count"] = len(tasks)
+        typer.echo(json.dumps(out, indent=2, sort_keys=True))
+        return
+
+    if not tasks:
+        console.print("[dim]No tasks found[/dim]")
+        return
+
+    for task in tasks:
+        labels = ",".join(task.get("labels", []))
+        updated = task.get("updated_at", "n/a")
+        console.print(f"{task.get('id', '')} [{updated}] @{labels} {task.get('content', '')}")
+
+
+@autodoist_app.command("doing-now")
+def autodoist_doing_now(
+    apply: bool = typer.Option(False, "--apply", help="Apply reconcile (default is dry-run)"),
+    winner_task_id: Optional[str] = typer.Option(None, "--winner-task-id", help="Prefer specific winner task id"),
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """Reconcile singleton doing_now label via Autodoist."""
+    client = get_autodoist_client()
+    try:
+        payload = client.reconcile_doing_now(apply=apply, winner_task_id=winner_task_id)
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to reconcile doing_now:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    mode = "applied" if payload.get("applied") else "dry-run"
+    console.print(f"mode: {mode}")
+    console.print(f"winner_task_id: {payload.get('winner_task_id')}")
+    console.print(f"removed_count: {payload.get('removed_count', 0)}")
+    if payload.get("message"):
+        console.print(payload["message"])
+
+
+@autodoist_app.command("set-doing-now")
+def autodoist_set_doing_now(
+    task_id: str = typer.Argument(..., help="Task ID to force as doing_now winner"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview only, do not apply"),
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """Set doing_now winner task through reconcile override."""
+    client = get_autodoist_client()
+    try:
+        payload = client.reconcile_doing_now(apply=not dry_run, winner_task_id=task_id)
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to set doing_now winner:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    mode = "applied" if payload.get("applied") else "dry-run"
+    console.print(f"mode: {mode}")
+    console.print(f"winner_task_id: {payload.get('winner_task_id')}")
+    console.print(f"removed_count: {payload.get('removed_count', 0)}")
+
+
 # --- Config Command ---
 @app.command()
 def config(
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Set API token"),
+    autodoist_url: Optional[str] = typer.Option(
+        None, "--autodoist-url", help="Set Autodoist base URL (e.g. https://autodoist.erauner.dev)"
+    ),
     show: bool = typer.Option(False, "--show", "-s", help="Show current config (redacted)"),
 ):
     """Manage CLI configuration."""
@@ -1032,7 +1182,14 @@ def config(
         console.print("[green]Token saved to ~/.config/todoist/config.json[/green]")
         return
 
-    console.print("Use --token to set token or --show to view config")
+    if autodoist_url:
+        cfg = get_config()
+        cfg["autodoist_url"] = autodoist_url.rstrip("/")
+        save_config(cfg)
+        console.print("[green]Autodoist URL saved to ~/.config/todoist/config.json[/green]")
+        return
+
+    console.print("Use --token, --autodoist-url, or --show")
 
 
 # --- Audit ---

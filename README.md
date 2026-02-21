@@ -37,6 +37,11 @@ export TODOIST_API_TOKEN=your_token_here
 # Option 2: Config file (same as sachaos/todoist)
 td config --token your_token_here
 # Saved to ~/.config/todoist/config.json
+
+# Optional: Autodoist API base URL for singleton doing_now integration
+export AUTODOIST_URL=https://autodoist.erauner.dev
+# or persist in config:
+td config --autodoist-url https://autodoist.erauner.dev
 ```
 
 ## Usage
@@ -114,6 +119,17 @@ td comments <task_id>       # List all comments
 ```bash
 td projects                 # List all projects
 td labels                   # List all labels
+```
+
+### Autodoist integration (doing_now singleton helpers)
+
+```bash
+td autodoist health
+td autodoist state
+td autodoist tasks --label doing_now
+td autodoist doing-now                 # dry-run reconcile
+td autodoist doing-now --apply         # apply reconcile
+td autodoist set-doing-now <task_id>   # force winner and reconcile
 ```
 
 ## Comparison with sachaos/todoist
