@@ -1061,8 +1061,11 @@ def autodoist_state(
     console.print(f"generated_at: {payload.get('generated_at', 'n/a')}")
     console.print(f"open_tasks: {summary.get('open_tasks', 0)}")
     console.print(f"{labels.get('next_action_label', 'next_action')}: {summary.get('next_action_count', 0)}")
-    console.print(f"{labels.get('doing_now_label', 'doing_now')}: {summary.get('doing_now_count', 0)}")
-    console.print(f"doing_now_conflicts: {summary.get('doing_now_conflicts', 0)}")
+    focus_label = labels.get("focus_label") or labels.get("doing_now_label", "focus")
+    focus_count = summary.get("focus_count", summary.get("doing_now_count", 0))
+    focus_conflicts = summary.get("focus_conflicts", summary.get("doing_now_conflicts", 0))
+    console.print(f"{focus_label}: {focus_count}")
+    console.print(f"focus_conflicts: {focus_conflicts}")
 
 
 @autodoist_app.command("tasks")
@@ -1101,18 +1104,19 @@ def autodoist_tasks(
         console.print(f"{task.get('id', '')} [{updated}] @{labels} {task.get('content', '')}")
 
 
-@autodoist_app.command("doing-now")
-def autodoist_doing_now(
+@autodoist_app.command("focus")
+@autodoist_app.command("doing-now", hidden=True)
+def autodoist_focus(
     apply: bool = typer.Option(False, "--apply", help="Apply reconcile (default is dry-run)"),
     winner_task_id: Optional[str] = typer.Option(None, "--winner-task-id", help="Prefer specific winner task id"),
     json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
 ):
-    """Reconcile singleton doing_now label via Autodoist."""
+    """Reconcile singleton focus label via Autodoist."""
     client = get_autodoist_client()
     try:
-        payload = client.reconcile_doing_now(apply=apply, winner_task_id=winner_task_id)
+        payload = client.reconcile_focus(apply=apply, winner_task_id=winner_task_id)
     except AutodoistClientError as exc:
-        console.print(f"[red]Failed to reconcile doing_now:[/red] {exc}")
+        console.print(f"[red]Failed to reconcile focus:[/red] {exc}")
         raise typer.Exit(1)
 
     if json_output:
@@ -1127,18 +1131,19 @@ def autodoist_doing_now(
         console.print(payload["message"])
 
 
-@autodoist_app.command("set-doing-now")
-def autodoist_set_doing_now(
-    task_id: str = typer.Argument(..., help="Task ID to force as doing_now winner"),
+@autodoist_app.command("set-focus")
+@autodoist_app.command("set-doing-now", hidden=True)
+def autodoist_set_focus(
+    task_id: str = typer.Argument(..., help="Task ID to force as focus winner"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview only, do not apply"),
     json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
 ):
-    """Set doing_now winner task through reconcile override."""
+    """Set focus winner task through reconcile override."""
     client = get_autodoist_client()
     try:
-        payload = client.reconcile_doing_now(apply=not dry_run, winner_task_id=task_id)
+        payload = client.reconcile_focus(apply=not dry_run, winner_task_id=task_id)
     except AutodoistClientError as exc:
-        console.print(f"[red]Failed to set doing_now winner:[/red] {exc}")
+        console.print(f"[red]Failed to set focus winner:[/red] {exc}")
         raise typer.Exit(1)
 
     if json_output:

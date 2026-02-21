@@ -38,12 +38,12 @@ def test_tasks_passes_optional_filters():
         resp.json.return_value = {"tasks": []}
         req.return_value = resp
 
-        client.tasks(label="doing_now", contains="hello")
+        client.tasks(label="focus", contains="hello")
 
         req.assert_called_once_with(
             "GET",
             "https://autodoist.example.com/api/tasks",
-            params={"label": "doing_now", "contains": "hello"},
+            params={"label": "focus", "contains": "hello"},
             json=None,
             timeout=10.0,
         )
@@ -58,11 +58,11 @@ def test_reconcile_posts_payload():
         resp.json.return_value = {"ok": True}
         req.return_value = resp
 
-        client.reconcile_doing_now(apply=True, winner_task_id="abc123")
+        client.reconcile_focus(apply=True, winner_task_id="abc123")
 
         req.assert_called_once_with(
             "POST",
-            "https://autodoist.example.com/api/doing-now/reconcile",
+            "https://autodoist.example.com/api/focus/reconcile",
             params=None,
             json={"apply": True, "winner_task_id": "abc123"},
             timeout=10.0,

@@ -123,15 +123,15 @@ td projects                 # List all projects
 td labels                   # List all labels
 ```
 
-### Autodoist integration (doing_now singleton helpers)
+### Autodoist integration (focus singleton helpers)
 
 ```bash
 td autodoist health
 td autodoist state
-td autodoist tasks --label doing_now
-td autodoist doing-now                 # dry-run reconcile
-td autodoist doing-now --apply         # apply reconcile
-td autodoist set-doing-now <task_id>   # force winner and reconcile
+td autodoist tasks --label focus
+td autodoist focus                 # dry-run reconcile
+td autodoist focus --apply         # apply reconcile
+td autodoist set-focus <task_id>   # force winner and reconcile
 ```
 
 ## Comparison with sachaos/todoist

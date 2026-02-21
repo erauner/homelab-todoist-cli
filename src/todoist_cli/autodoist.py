@@ -60,7 +60,7 @@ class AutodoistClient:
             params["contains"] = contains
         return self._request("GET", "/api/tasks", params=params or None)
 
-    def reconcile_doing_now(
+    def reconcile_focus(
         self,
         *,
         apply: bool = False,
@@ -69,4 +69,4 @@ class AutodoistClient:
         body: dict[str, Any] = {"apply": apply}
         if winner_task_id:
             body["winner_task_id"] = winner_task_id
-        return self._request("POST", "/api/doing-now/reconcile", json=body)
+        return self._request("POST", "/api/focus/reconcile", json=body)

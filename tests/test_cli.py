@@ -886,10 +886,10 @@ class TestAutodoist:
             "summary": {
                 "open_tasks": 10,
                 "next_action_count": 2,
-                "doing_now_count": 1,
-                "doing_now_conflicts": 0,
+                "focus_count": 1,
+                "focus_conflicts": 0,
             },
-            "labels": {"next_action_label": "next_action", "doing_now_label": "doing_now"},
+            "labels": {"next_action_label": "next_action", "focus_label": "focus"},
         }
 
         with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
@@ -897,53 +897,53 @@ class TestAutodoist:
 
         assert result.exit_code == 0
         assert "open_tasks: 10" in result.output
-        assert "doing_now: 1" in result.output
+        assert "focus: 1" in result.output
         mock_client.state.assert_called_once_with()
 
     def test_autodoist_tasks(self):
         mock_client = MagicMock()
         mock_client.tasks.return_value = {
             "tasks": [
-                {"id": "1", "content": "First", "labels": ["doing_now"], "updated_at": "2026-01-01T00:00:00Z"},
+                {"id": "1", "content": "First", "labels": ["focus"], "updated_at": "2026-01-01T00:00:00Z"},
             ]
         }
 
         with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
-            result = runner.invoke(app, ["autodoist", "tasks", "--label", "doing_now"])
+            result = runner.invoke(app, ["autodoist", "tasks", "--label", "focus"])
 
         assert result.exit_code == 0
         assert "First" in result.output
-        mock_client.tasks.assert_called_once_with(label="doing_now", contains=None)
+        mock_client.tasks.assert_called_once_with(label="focus", contains=None)
 
-    def test_autodoist_doing_now_apply(self):
+    def test_autodoist_focus_apply(self):
         mock_client = MagicMock()
-        mock_client.reconcile_doing_now.return_value = {
+        mock_client.reconcile_focus.return_value = {
             "applied": True,
             "winner_task_id": "task-2",
             "removed_count": 1,
         }
 
         with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
-            result = runner.invoke(app, ["autodoist", "doing-now", "--apply"])
+            result = runner.invoke(app, ["autodoist", "focus", "--apply"])
 
         assert result.exit_code == 0
         assert "winner_task_id: task-2" in result.output
-        mock_client.reconcile_doing_now.assert_called_once_with(apply=True, winner_task_id=None)
+        mock_client.reconcile_focus.assert_called_once_with(apply=True, winner_task_id=None)
 
-    def test_autodoist_set_doing_now(self):
+    def test_autodoist_set_focus(self):
         mock_client = MagicMock()
-        mock_client.reconcile_doing_now.return_value = {
+        mock_client.reconcile_focus.return_value = {
             "applied": True,
             "winner_task_id": "task-3",
             "removed_count": 2,
         }
 
         with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
-            result = runner.invoke(app, ["autodoist", "set-doing-now", "task-3"])
+            result = runner.invoke(app, ["autodoist", "set-focus", "task-3"])
 
         assert result.exit_code == 0
         assert "winner_task_id: task-3" in result.output
-        mock_client.reconcile_doing_now.assert_called_once_with(apply=True, winner_task_id="task-3")
+        mock_client.reconcile_focus.assert_called_once_with(apply=True, winner_task_id="task-3")
 
 
 class TestConfigCommand:
