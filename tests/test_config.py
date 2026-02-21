@@ -57,6 +57,14 @@ def test_get_autodoist_url_from_config(tmp_path, monkeypatch):
         assert get_autodoist_url() == "https://autodoist.erauner.dev"
 
 
+def test_get_autodoist_url_default(tmp_path, monkeypatch):
+    """Autodoist URL falls back to default when not configured."""
+    monkeypatch.delenv("AUTODOIST_URL", raising=False)
+    config_file = tmp_path / "nonexistent.json"
+    with patch("todoist_cli.config.CONFIG_FILE", config_file):
+        assert get_autodoist_url() == "https://autodoist.erauner.dev"
+
+
 def test_save_config_creates_file(tmp_path):
     """Config file is created with correct permissions."""
     config_dir = tmp_path / ".config" / "todoist"

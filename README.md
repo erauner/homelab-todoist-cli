@@ -38,9 +38,11 @@ export TODOIST_API_TOKEN=your_token_here
 td config --token your_token_here
 # Saved to ~/.config/todoist/config.json
 
-# Optional: Autodoist API base URL for singleton doing_now integration
+# Autodoist API URL defaults to:
+#   https://autodoist.erauner.dev
+# Override only if needed:
 export AUTODOIST_URL=https://autodoist.erauner.dev
-# or persist in config:
+# or persist override in config:
 td config --autodoist-url https://autodoist.erauner.dev
 ```
 

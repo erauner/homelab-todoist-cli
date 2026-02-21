@@ -6,6 +6,7 @@ from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "todoist"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+DEFAULT_AUTODOIST_URL = "https://autodoist.erauner.dev"
 
 
 def get_config() -> dict:
@@ -25,7 +26,7 @@ def get_token() -> str | None:
     return config.get("token")
 
 
-def get_autodoist_url() -> str | None:
+def get_autodoist_url() -> str:
     """Get Autodoist API base URL from config or environment."""
     if url := os.environ.get("AUTODOIST_URL"):
         return url.rstrip("/")
@@ -33,7 +34,7 @@ def get_autodoist_url() -> str | None:
     value = config.get("autodoist_url")
     if isinstance(value, str):
         return value.rstrip("/")
-    return None
+    return DEFAULT_AUTODOIST_URL
 
 
 def save_config(config: dict) -> None:

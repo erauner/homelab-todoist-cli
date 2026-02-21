@@ -48,13 +48,6 @@ def get_client() -> TodoistClient:
 def get_autodoist_client() -> AutodoistClient:
     """Get configured Autodoist API client."""
     url = get_autodoist_url()
-    if not url:
-        raise SystemExit(
-            "No Autodoist URL found.\n\n"
-            "Set it in one of these ways:\n"
-            "  1. Environment variable: export AUTODOIST_URL=https://autodoist.erauner.dev\n"
-            "  2. Config file: td config --autodoist-url https://autodoist.erauner.dev"
-        )
     return AutodoistClient(base_url=url)
 
 
