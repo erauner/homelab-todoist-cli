@@ -1156,6 +1156,40 @@ def autodoist_set_focus(
     console.print(f"removed_count: {payload.get('removed_count', 0)}")
 
 
+@autodoist_app.command("action")
+def autodoist_action(
+    task_id: str = typer.Argument(..., help="Task ID"),
+    action: str = typer.Argument(
+        ..., help="One of: set-focus, clear-focus, remove-next-action, make-winner"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """Apply a row-level label action to a task in Autodoist."""
+    normalized = action.strip().lower().replace("-", "_")
+    allowed = {"set_focus", "clear_focus", "remove_next_action", "make_winner"}
+    if normalized not in allowed:
+        console.print(
+            "[red]Invalid action.[/red] Use one of: set-focus, clear-focus, remove-next-action, make-winner"
+        )
+        raise typer.Exit(1)
+
+    client = get_autodoist_client()
+    try:
+        payload = client.task_label_action(task_id=task_id, action=normalized)
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to apply action:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    if payload.get("message"):
+        console.print(payload["message"])
+    else:
+        console.print(f"action: {payload.get('action', normalized)} task_id: {payload.get('task_id', task_id)}")
+
+
 # --- Config Command ---
 @app.command()
 def config(

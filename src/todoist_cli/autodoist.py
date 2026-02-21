@@ -70,3 +70,6 @@ class AutodoistClient:
         if winner_task_id:
             body["winner_task_id"] = winner_task_id
         return self._request("POST", "/api/focus/reconcile", json=body)
+
+    def task_label_action(self, task_id: str, action: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/tasks/{task_id}/labels", json={"action": action})

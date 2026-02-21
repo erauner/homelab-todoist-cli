@@ -945,6 +945,32 @@ class TestAutodoist:
         assert "winner_task_id: task-3" in result.output
         mock_client.reconcile_focus.assert_called_once_with(apply=True, winner_task_id="task-3")
 
+    def test_autodoist_action_set_focus(self):
+        mock_client = MagicMock()
+        mock_client.task_label_action.return_value = {
+            "ok": True,
+            "action": "set_focus",
+            "task_id": "task-1",
+            "message": "Set @focus on task task-1.",
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "action", "task-1", "set-focus"])
+
+        assert result.exit_code == 0
+        assert "Set @focus on task task-1." in result.output
+        mock_client.task_label_action.assert_called_once_with(task_id="task-1", action="set_focus")
+
+    def test_autodoist_action_rejects_invalid_action(self):
+        mock_client = MagicMock()
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "action", "task-1", "invalid-action"])
+
+        assert result.exit_code == 1
+        assert "Invalid action" in result.output
+        mock_client.task_label_action.assert_not_called()
+
 
 class TestConfigCommand:
     """Tests for config command options."""

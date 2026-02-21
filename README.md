@@ -132,6 +132,10 @@ td autodoist tasks --label focus
 td autodoist focus                 # dry-run reconcile
 td autodoist focus --apply         # apply reconcile
 td autodoist set-focus <task_id>   # force winner and reconcile
+td autodoist action <task_id> set-focus
+td autodoist action <task_id> clear-focus
+td autodoist action <task_id> remove-next-action
+td autodoist action <task_id> make-winner
 ```
 
 ## Comparison with sachaos/todoist

@@ -69,6 +69,26 @@ def test_reconcile_posts_payload():
         )
 
 
+def test_task_label_action_posts_payload():
+    client = AutodoistClient("https://autodoist.example.com")
+
+    with patch("todoist_cli.autodoist.requests.request") as req:
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"ok": True}
+        req.return_value = resp
+
+        client.task_label_action(task_id="task-1", action="set_focus")
+
+        req.assert_called_once_with(
+            "POST",
+            "https://autodoist.example.com/api/tasks/task-1/labels",
+            params=None,
+            json={"action": "set_focus"},
+            timeout=10.0,
+        )
+
+
 def test_request_exception_wrapped():
     client = AutodoistClient("https://autodoist.example.com")
 
