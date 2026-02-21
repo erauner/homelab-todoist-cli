@@ -181,6 +181,18 @@ class TestAdd:
         call_kwargs = mock_api.add_task.call_args[1]
         assert call_kwargs["description"] == "This is the description"
 
+    def test_add_normalizes_multiline_description(self, mock_api, mock_token):
+        """Add collapses multiline description whitespace for readability."""
+        mock_api.add_task.return_value = make_mock_task(content="Task with desc")
+
+        result = runner.invoke(
+            app,
+            ["add", "Task with desc", "-d", "Line one\n\n  Line two\tLine three"],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_api.add_task.call_args[1]
+        assert call_kwargs["description"] == "Line one Line two Line three"
+
     def test_add_with_due_date(self, mock_api, mock_token):
         """Add creates task with due date."""
         mock_api.add_task.return_value = make_mock_task(content="Task with due")
@@ -250,6 +262,27 @@ class TestAdd:
 
         assert result.exit_code == 1
         assert "Failed to set focus for new task" in result.output
+
+    def test_add_focus_normalizes_multiline_description(self, mock_api, mock_token):
+        """add-focus collapses multiline description whitespace before creating task."""
+        mock_api.add_task.return_value = make_mock_task(id="new123", content="Focus task")
+        mock_auto = MagicMock()
+        mock_auto.task_label_action.return_value = {
+            "ok": True,
+            "action": "make_winner",
+            "task_id": "new123",
+            "message": "Task new123 is now focus winner.",
+        }
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_auto):
+            result = runner.invoke(
+                app,
+                ["add-focus", "Focus task", "-d", "Do this\n\n  right\taway"],
+            )
+
+        assert result.exit_code == 0
+        call_kwargs = mock_api.add_task.call_args[1]
+        assert call_kwargs["description"] == "Do this right away"
 
 
 class TestQuery:
@@ -346,6 +379,18 @@ class TestModify:
         assert result.exit_code == 0
         call_kwargs = mock_api.update_task.call_args[1]
         assert call_kwargs["description"] == "New description"
+
+    def test_modify_normalizes_multiline_description(self, mock_api, mock_token):
+        """Modify collapses multiline description whitespace for readability."""
+        mock_api.update_task.return_value = make_mock_task(description="New description")
+
+        result = runner.invoke(
+            app,
+            ["modify", "123", "--description", "New\n\n  description\tvalue"],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_api.update_task.call_args[1]
+        assert call_kwargs["description"] == "New description value"
 
     def test_modify_priority(self, mock_api, mock_token):
         """Modify updates task priority."""

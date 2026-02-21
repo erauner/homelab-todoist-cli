@@ -1,6 +1,7 @@
 """Todoist CLI - Main command-line interface."""
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import Optional
 import uuid
@@ -79,6 +80,11 @@ def sync_api_command(token: str, command_type: str, args: dict) -> dict:
     )
     response.raise_for_status()
     return response.json()
+
+
+def _normalize_description(description: str) -> str:
+    """Collapse excess whitespace in task descriptions for cleaner rendering."""
+    return re.sub(r"\s+", " ", description).strip()
 
 
 # --- List Command ---
@@ -175,8 +181,10 @@ def add(
 
     kwargs = {"content": content, "priority": priority}
 
-    if description:
-        kwargs["description"] = description
+    if description is not None:
+        normalized_description = _normalize_description(description)
+        if normalized_description:
+            kwargs["description"] = normalized_description
 
     if project:
         project_map = get_project_map(api)
@@ -241,8 +249,10 @@ def add_focus(
 
     kwargs = {"content": content, "priority": priority}
 
-    if description:
-        kwargs["description"] = description
+    if description is not None:
+        normalized_description = _normalize_description(description)
+        if normalized_description:
+            kwargs["description"] = normalized_description
 
     if project:
         project_map = get_project_map(api)
@@ -834,7 +844,7 @@ def modify(
     if content:
         kwargs["content"] = content
     if description is not None:
-        kwargs["description"] = description
+        kwargs["description"] = _normalize_description(description)
     if priority:
         kwargs["priority"] = priority
     if no_due:
