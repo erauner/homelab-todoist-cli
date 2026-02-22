@@ -480,6 +480,76 @@ class TestComment:
         assert "Added comment" in result.output
         mock_api.add_comment.assert_called_once_with(task_id="123", content="My comment")
 
+    def test_comment_dedupe_skips_similar(self, mock_api, mock_token):
+        """Comment skips near-duplicate writes by default."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c1", content="My comment"),
+        ]])
+
+        result = runner.invoke(app, ["comment", "123", "My   comment"])
+        assert result.exit_code == 0
+        assert "Skipped duplicate comment" in result.output
+        mock_api.add_comment.assert_not_called()
+
+    def test_comment_force_bypasses_dedupe(self, mock_api, mock_token):
+        """Comment writes when --force is supplied."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c1", content="My comment"),
+        ]])
+        mock_api.add_comment.return_value = make_mock_comment(id="c2", content="My comment")
+
+        result = runner.invoke(app, ["comment", "123", "My comment", "--force"])
+        assert result.exit_code == 0
+        assert "Added comment" in result.output
+        mock_api.add_comment.assert_called_once_with(task_id="123", content="My comment")
+
+    def test_comment_update_last_mode(self, mock_api, mock_token):
+        """Comment updates latest comment with update-last mode."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c-old", content="Old", posted_at="2026-02-22T10:00:00Z"),
+            make_mock_comment(id="c-new", content="New", posted_at="2026-02-22T11:00:00Z"),
+        ]])
+        mock_api.update_comment.return_value = make_mock_comment(id="c-new", content="Updated")
+
+        result = runner.invoke(
+            app,
+            ["comment", "123", "Updated text", "--mode", "update-last", "--no-dedupe"],
+        )
+        assert result.exit_code == 0
+        assert "Updated latest comment" in result.output
+        mock_api.update_comment.assert_called_once_with(comment_id="c-new", content="Updated text")
+
+    def test_comment_overwrite_latest_plan_mode(self, mock_api, mock_token):
+        """Comment overwrites latest plan-like comment when present."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c1", content="General update", posted_at="2026-02-22T12:00:00Z"),
+            make_mock_comment(id="c2", content="NEXT ACTION (10 min): do thing", posted_at="2026-02-22T11:00:00Z"),
+        ]])
+        mock_api.update_comment.return_value = make_mock_comment(id="c2", content="NEXT ACTION: replacement")
+
+        result = runner.invoke(
+            app,
+            ["comment", "123", "NEXT ACTION: replacement", "--mode", "overwrite-latest-plan", "--no-dedupe"],
+        )
+        assert result.exit_code == 0
+        assert "Overwrote plan comment" in result.output
+        mock_api.update_comment.assert_called_once_with(comment_id="c2", content="NEXT ACTION: replacement")
+
+    def test_comment_overwrite_latest_plan_falls_back_to_append(self, mock_api, mock_token):
+        """Plan overwrite mode appends when no plan-like comment exists."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c1", content="General update"),
+        ]])
+        mock_api.add_comment.return_value = make_mock_comment(id="c2", content="Plan comment")
+
+        result = runner.invoke(
+            app,
+            ["comment", "123", "Plan comment", "--mode", "overwrite-latest-plan", "--no-dedupe"],
+        )
+        assert result.exit_code == 0
+        assert "No plan-like comment found; added comment" in result.output
+        mock_api.add_comment.assert_called_once_with(task_id="123", content="Plan comment")
+
 
 class TestComments:
     """Tests for comments command."""

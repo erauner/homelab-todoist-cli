@@ -114,7 +114,10 @@ td modify <task_id> --description "Updated description"
 ### Comments
 
 ```bash
-td comment <task_id> "This is a comment"
+td comment <task_id> "This is a comment"                       # append (default)
+td comment <task_id> "Refined plan..." --mode update-last      # edit latest comment
+td comment <task_id> "New next action..." --mode overwrite-latest-plan
+td comment <task_id> "Duplicate text" --force                  # bypass dedupe
 td comments <task_id>       # List all comments
 ```
 

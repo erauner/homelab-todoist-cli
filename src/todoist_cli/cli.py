@@ -2,6 +2,7 @@
 
 import json
 import re
+from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from typing import Optional
 import uuid
@@ -85,6 +86,32 @@ def sync_api_command(token: str, command_type: str, args: dict) -> dict:
 def _normalize_description(description: str) -> str:
     """Collapse excess whitespace in task descriptions for cleaner rendering."""
     return re.sub(r"\s+", " ", description).strip()
+
+
+def _normalize_comment_text(text: str) -> str:
+    """Normalize comment text for stable duplicate checks."""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _is_similar_comment(existing: str, proposed: str, threshold: float = 0.94) -> bool:
+    """Return True when comment bodies are effectively the same."""
+    a = _normalize_comment_text(existing)
+    b = _normalize_comment_text(proposed)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if len(a) >= 40 and len(b) >= 40 and (a in b or b in a):
+        return True
+    return SequenceMatcher(a=a, b=b).ratio() >= threshold
+
+
+def _collect_task_comments(api: TodoistAPI, task_id: str) -> list:
+    """Return task comments sorted most-recent first (best effort)."""
+    task_comments = []
+    for page in api.get_comments(task_id=task_id):
+        task_comments.extend(page)
+    return sorted(task_comments, key=lambda c: str(getattr(c, "posted_at", "")), reverse=True)
 
 
 # --- List Command ---
@@ -894,15 +921,68 @@ def modify(
 def comment(
     task_id: str = typer.Argument(..., help="Task ID"),
     text: str = typer.Argument(..., help="Comment text"),
+    mode: str = typer.Option(
+        "append",
+        "--mode",
+        help="Write mode: append | update-last | overwrite-latest-plan",
+    ),
+    dedupe: bool = typer.Option(True, "--dedupe/--no-dedupe", help="Skip near-duplicate comment writes"),
+    recent: int = typer.Option(5, "--recent", min=1, max=20, help="Number of recent comments to check for dedupe"),
+    force: bool = typer.Option(False, "--force", help="Bypass dedupe checks"),
 ):
-    """Add a comment to a task."""
+    """Add or update a comment on a task with optional dedupe safeguards."""
     api = get_api()
+    mode = mode.strip().lower()
+    valid_modes = {"append", "update-last", "overwrite-latest-plan"}
+    if mode not in valid_modes:
+        console.print(f"[red]Invalid --mode '{mode}'. Use one of: {', '.join(sorted(valid_modes))}[/red]")
+        raise typer.Exit(1)
+
+    if force:
+        dedupe = False
 
     try:
-        comment = api.add_comment(task_id=task_id, content=text)
-        console.print(f"[green]Added comment:[/green] {comment.id}")
+        task_comments = _collect_task_comments(api, task_id)
+
+        if dedupe:
+            for existing in task_comments[:recent]:
+                if _is_similar_comment(str(getattr(existing, "content", "")), text):
+                    console.print(f"[yellow]Skipped duplicate comment:[/yellow] {existing.id}")
+                    return
+
+        if mode == "append":
+            created = api.add_comment(task_id=task_id, content=text)
+            console.print(f"[green]Added comment:[/green] {created.id}")
+            return
+
+        if mode == "update-last":
+            if not task_comments:
+                created = api.add_comment(task_id=task_id, content=text)
+                console.print(f"[yellow]No existing comments; added comment:[/yellow] {created.id}")
+                return
+            latest = task_comments[0]
+            updated = api.update_comment(comment_id=latest.id, content=text)
+            console.print(f"[green]Updated latest comment:[/green] {updated.id}")
+            return
+
+        # mode == "overwrite-latest-plan"
+        plan_markers = ("next action", "plan/next steps", "next step")
+        target = next(
+            (
+                c
+                for c in task_comments
+                if any(marker in _normalize_comment_text(str(getattr(c, "content", ""))) for marker in plan_markers)
+            ),
+            None,
+        )
+        if target is None:
+            created = api.add_comment(task_id=task_id, content=text)
+            console.print(f"[yellow]No plan-like comment found; added comment:[/yellow] {created.id}")
+            return
+        updated = api.update_comment(comment_id=target.id, content=text)
+        console.print(f"[green]Overwrote plan comment:[/green] {updated.id}")
     except Exception as e:
-        console.print(f"[red]Failed to add comment: {e}[/red]")
+        console.print(f"[red]Failed to write comment: {e}[/red]")
         raise typer.Exit(1)
 
 
