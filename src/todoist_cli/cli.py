@@ -153,6 +153,32 @@ def _collect_task_comments(api: TodoistAPI, task_id: str) -> list:
     return sorted(task_comments, key=lambda c: str(getattr(c, "posted_at", "")), reverse=True)
 
 
+def _clear_task_comments(api: TodoistAPI, task_id: str, *, keep_plan: bool = False) -> tuple[int, int]:
+    """Delete task comments and return (deleted_count, kept_count)."""
+    task_comments = _collect_task_comments(api, task_id)
+    if not task_comments:
+        return 0, 0
+
+    deleted = 0
+    kept = 0
+    for comment in task_comments:
+        content = str(getattr(comment, "content", ""))
+        if keep_plan and "[openclaw:plan]" in _normalize_comment_text(content):
+            kept += 1
+            continue
+        api.delete_comment(str(comment.id))
+        deleted += 1
+    return deleted, kept
+
+
+def _is_task_recurring(task: object) -> bool:
+    """Return True when task has a recurring due schedule."""
+    due = getattr(task, "due", None)
+    if due is None:
+        return False
+    return getattr(due, "is_recurring", False) is True
+
+
 def _write_task_comment(
     api: TodoistAPI,
     task_id: str,
@@ -506,11 +532,45 @@ def show(
 @app.command()
 def close(
     task_id: str = typer.Argument(..., help="Task ID to complete"),
+    clear_comments: Optional[bool] = typer.Option(
+        None,
+        "--clear-comments/--no-clear-comments",
+        help="Delete task comments before completing (default: auto for recurring tasks)",
+    ),
+    keep_plan: bool = typer.Option(
+        False,
+        "--keep-plan",
+        help="When clearing comments, keep [openclaw:plan] entries",
+    ),
 ):
-    """Complete/close a task."""
+    """Complete/close a task.
+
+    Default behavior:
+    - Recurring task: clear comments before close
+    - Non-recurring task: keep comments unless explicitly requested
+    """
     api = get_api()
+    if keep_plan and clear_comments is False:
+        console.print("[red]--keep-plan cannot be used with --no-clear-comments[/red]")
+        raise typer.Exit(1)
 
     try:
+        should_clear = False
+        if clear_comments is None:
+            task = api.get_task(task_id)
+            recurring = _is_task_recurring(task)
+            should_clear = recurring or keep_plan
+            if recurring:
+                console.print("[dim]Auto-clear enabled for recurring task comments[/dim]")
+        else:
+            should_clear = clear_comments or keep_plan
+
+        if should_clear:
+            deleted, kept = _clear_task_comments(api, task_id, keep_plan=keep_plan)
+            if keep_plan:
+                console.print(f"[green]Cleared comments:[/green] deleted={deleted} kept_plan={kept}")
+            else:
+                console.print(f"[green]Cleared comments:[/green] deleted={deleted}")
         api.complete_task(task_id)
         console.print(f"[green]Completed task:[/green] {task_id}")
     except Exception as e:
@@ -1135,6 +1195,33 @@ def comments(
         print_comments(task_comments)
     except Exception as e:
         console.print(f"[red]Failed to get comments: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command(name="comments-clear")
+def comments_clear(
+    task_id: str = typer.Argument(..., help="Task ID"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    keep_plan: bool = typer.Option(False, "--keep-plan", help="Keep [openclaw:plan] comments"),
+):
+    """Delete comments for a task (optionally keep rolling plan comments)."""
+    api = get_api()
+
+    if not yes:
+        prompt = f"Delete comments for task {task_id}?"
+        if keep_plan:
+            prompt += " (plan comments will be kept)"
+        if not typer.confirm(prompt):
+            raise typer.Abort()
+
+    try:
+        deleted, kept = _clear_task_comments(api, task_id, keep_plan=keep_plan)
+        if keep_plan:
+            console.print(f"[green]Cleared comments:[/green] deleted={deleted} kept_plan={kept}")
+        else:
+            console.print(f"[green]Cleared comments:[/green] deleted={deleted}")
+    except Exception as e:
+        console.print(f"[red]Failed to clear comments: {e}[/red]")
         raise typer.Exit(1)
 
 

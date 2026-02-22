@@ -119,6 +119,8 @@ td comment <task_id> "Refined plan..." --mode update-last      # edit latest com
 td comment <task_id> "New next action..." --mode overwrite-latest-plan
 td comment <task_id> "Duplicate text" --force                  # bypass dedupe
 td comments <task_id>       # List all comments
+td comments-clear <task_id> --yes                              # Delete all comments
+td comments-clear <task_id> --yes --keep-plan                 # Keep [openclaw:plan]
 ```
 
 ### Smart progress logging
@@ -127,6 +129,8 @@ td comments <task_id>       # List all comments
 td progress <task_id> "Check DECOMM ticket status"             # auto: plan snapshot
 td progress <task_id> "Created DECOMM-42 and shared link"      # auto: progress log
 td progress <task_id> "Final update posted" --type progress --close
+td close <task_id>                                             # Recurring tasks auto-clear comments
+td close <task_id> --clear-comments --keep-plan                # Preserve [openclaw:plan]
 ```
 
 Notes:
