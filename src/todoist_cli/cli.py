@@ -813,8 +813,23 @@ def move(
         raise typer.Exit(1)
 
     try:
-        task = api.move_task(task_id=task_id, project_id=target_project_id)
-        console.print(f"[green]Moved task to {project_name}:[/green] {task.content}")
+        task_content = None
+        try:
+            existing = api.get_task(task_id)
+            task_content = getattr(existing, "content", None)
+        except Exception:
+            pass
+
+        moved = api.move_task(task_id=task_id, project_id=target_project_id)
+        if task_content is None:
+            if isinstance(moved, dict):
+                task_content = moved.get("content")
+            else:
+                task_content = getattr(moved, "content", None)
+        if not task_content:
+            task_content = task_id
+
+        console.print(f"[green]Moved task to {project_name}:[/green] {task_content}")
     except Exception as e:
         console.print(f"[red]Failed to move task: {e}[/red]")
         raise typer.Exit(1)
@@ -1037,6 +1052,7 @@ def modify(
     task_id: str = typer.Argument(..., help="Task ID to modify"),
     content: Optional[str] = typer.Option(None, "--content", "-c", help="New content"),
     description: Optional[str] = typer.Option(None, "--description", "-d", help="New description"),
+    parent_id: Optional[str] = typer.Option(None, "--parent-id", "--parent", help="New parent task ID (reparent task as subtask)"),
     priority: Optional[int] = typer.Option(None, "--priority", "-P", help="New priority (1-4)"),
     due: Optional[str] = typer.Option(None, "--due", "--do", "-D", help="New do date - when to work on it"),
     no_due: bool = typer.Option(False, "--no-due", "-N", help="Clear the due date"),
@@ -1058,6 +1074,8 @@ def modify(
         kwargs["content"] = content
     if description is not None:
         kwargs["description"] = _normalize_description(description)
+    if parent_id is not None:
+        kwargs["parent_id"] = parent_id
     if priority:
         kwargs["priority"] = priority
     if no_due:
@@ -1091,6 +1109,21 @@ def modify(
         console.print(f"[green]Updated task:[/green] {task_id}")
     except Exception as e:
         console.print(f"[red]Failed to update task: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def reparent(
+    task_id: str = typer.Argument(..., help="Task ID to reparent"),
+    parent_id: str = typer.Argument(..., help="New parent task ID"),
+):
+    """Move an existing task under another task as a subtask."""
+    api = get_api()
+    try:
+        api.update_task(task_id, parent_id=parent_id)
+        console.print(f"[green]Reparented task:[/green] {task_id} -> parent {parent_id}")
+    except Exception as e:
+        console.print(f"[red]Failed to reparent task: {e}[/red]")
         raise typer.Exit(1)
 
 

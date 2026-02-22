@@ -433,6 +433,15 @@ class TestModify:
         call_kwargs = mock_api.update_task.call_args[1]
         assert call_kwargs["priority"] == 3
 
+    def test_modify_parent_id(self, mock_api, mock_token):
+        """Modify can reparent an existing task under a parent task."""
+        mock_api.update_task.return_value = make_mock_task()
+
+        result = runner.invoke(app, ["modify", "123", "--parent-id", "parent123"])
+        assert result.exit_code == 0
+        call_kwargs = mock_api.update_task.call_args[1]
+        assert call_kwargs["parent_id"] == "parent123"
+
     def test_modify_due(self, mock_api, mock_token):
         """Modify updates task due date."""
         mock_api.update_task.return_value = make_mock_task()
@@ -1034,11 +1043,26 @@ class TestMove:
         mock_api.get_projects.return_value = iter([[
             make_mock_project(id="work_id", name="Work"),
         ]])
+        mock_api.get_task.return_value = make_mock_task(id="123", content="Moved task")
         mock_api.move_task.return_value = make_mock_task(content="Moved task", project_id="work_id")
 
         result = runner.invoke(app, ["move", "123", "Work"])
         assert result.exit_code == 0
         assert "Moved task to Work" in result.output
+        mock_api.move_task.assert_called_once_with(task_id="123", project_id="work_id")
+
+    def test_move_task_handles_dict_response(self, mock_api, mock_token):
+        """Move succeeds even when Todoist SDK returns dict payload."""
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="work_id", name="Work"),
+        ]])
+        mock_api.get_task.side_effect = Exception("not found")
+        mock_api.move_task.return_value = {"id": "123", "project_id": "work_id"}
+
+        result = runner.invoke(app, ["move", "123", "Work"])
+        assert result.exit_code == 0
+        assert "Moved task to Work" in result.output
+        assert "123" in result.output
         mock_api.move_task.assert_called_once_with(task_id="123", project_id="work_id")
 
     def test_move_project_not_found(self, mock_api, mock_token):
@@ -1050,6 +1074,27 @@ class TestMove:
         result = runner.invoke(app, ["move", "123", "NonExistent"])
         assert result.exit_code == 1
         assert "not found" in result.output
+
+
+class TestReparent:
+    """Tests for reparent command."""
+
+    def test_reparent_task(self, mock_api, mock_token):
+        """Reparent updates task parent_id."""
+        mock_api.update_task.return_value = make_mock_task(id="123")
+
+        result = runner.invoke(app, ["reparent", "123", "parent123"])
+        assert result.exit_code == 0
+        assert "Reparented task" in result.output
+        mock_api.update_task.assert_called_once_with("123", parent_id="parent123")
+
+    def test_reparent_error(self, mock_api, mock_token):
+        """Reparent reports API failure."""
+        mock_api.update_task.side_effect = Exception("API error")
+
+        result = runner.invoke(app, ["reparent", "123", "parent123"])
+        assert result.exit_code == 1
+        assert "Failed to reparent task" in result.output
 
 
 class TestToday:

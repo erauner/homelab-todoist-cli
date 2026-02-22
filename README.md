@@ -109,6 +109,8 @@ td close <task_id>          # Complete a task
 td delete <task_id>         # Delete a task
 td modify <task_id> --content "New title" --priority 3
 td modify <task_id> --description "Updated description"
+td modify <task_id> --parent-id <parent_task_id>   # Reparent as subtask
+td reparent <task_id> <parent_task_id>             # Explicit reparent command
 ```
 
 ### Comments
