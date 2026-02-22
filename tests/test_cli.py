@@ -547,7 +547,7 @@ class TestComment:
             ["comment", "123", "Plan comment", "--mode", "overwrite-latest-plan", "--no-dedupe"],
         )
         assert result.exit_code == 0
-        assert "No plan-like comment found; added comment" in result.output
+        assert "Added comment" in result.output
         mock_api.add_comment.assert_called_once_with(task_id="123", content="Plan comment")
 
 
@@ -574,6 +574,58 @@ class TestComments:
         assert result.exit_code == 0
         assert "No comments" in result.output
 
+
+class TestProgress:
+    """Tests for progress command."""
+
+    def test_progress_auto_plan_overwrites_latest_plan(self, mock_api, mock_token):
+        """Auto mode infers plan and overwrites latest plan comment."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c-plan", content="[openclaw:plan] old plan", posted_at="2026-02-22T12:00:00Z"),
+        ]])
+        mock_api.update_comment.return_value = make_mock_comment(id="c-plan", content="[openclaw:plan] new")
+
+        result = runner.invoke(app, ["progress", "123", "Check DECOMM ticket status"])
+        assert result.exit_code == 0
+        assert "action=overwrote_plan" in result.output
+        mock_api.update_comment.assert_called_once()
+        assert mock_api.update_comment.call_args.kwargs["comment_id"] == "c-plan"
+        assert mock_api.update_comment.call_args.kwargs["content"].startswith("[openclaw:plan]")
+
+    def test_progress_auto_infers_progress_and_appends(self, mock_api, mock_token):
+        """Auto mode infers progress from status wording and appends."""
+        mock_api.get_comments.return_value = iter([[]])
+        mock_api.add_comment.return_value = make_mock_comment(id="c2", content="[openclaw:progress] done")
+
+        result = runner.invoke(app, ["progress", "123", "Done: created DECOMM-42 and shared link"])
+        assert result.exit_code == 0
+        assert "action=added" in result.output
+        mock_api.add_comment.assert_called_once()
+        assert mock_api.add_comment.call_args.kwargs["content"].startswith("[openclaw:progress]")
+
+    def test_progress_force_with_close(self, mock_api, mock_token):
+        """Force bypasses dedupe and close completes task after write."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c1", content="[openclaw:progress] sent update"),
+        ]])
+        mock_api.add_comment.return_value = make_mock_comment(id="c2", content="[openclaw:progress] sent update")
+
+        result = runner.invoke(app, ["progress", "123", "sent update", "--type", "progress", "--force", "--close"])
+        assert result.exit_code == 0
+        assert "Closed task" in result.output
+        mock_api.complete_task.assert_called_once_with("123")
+
+    def test_progress_skip_duplicate_does_not_close(self, mock_api, mock_token):
+        """Skipped duplicate leaves task open even with --close."""
+        mock_api.get_comments.return_value = iter([[
+            make_mock_comment(id="c1", content="[openclaw:progress] sent update"),
+        ]])
+
+        result = runner.invoke(app, ["progress", "123", "sent update", "--type", "progress", "--close"])
+        assert result.exit_code == 0
+        assert "action=skipped_duplicate" in result.output
+        assert "Task left open" in result.output
+        mock_api.complete_task.assert_not_called()
 
 class TestClose:
     """Tests for close command."""

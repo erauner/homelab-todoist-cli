@@ -121,6 +121,14 @@ td comment <task_id> "Duplicate text" --force                  # bypass dedupe
 td comments <task_id>       # List all comments
 ```
 
+### Smart progress logging
+
+```bash
+td progress <task_id> "Check DECOMM ticket status"             # auto: plan snapshot
+td progress <task_id> "Created DECOMM-42 and shared link"      # auto: progress log
+td progress <task_id> "Final update posted" --type progress --close
+```
+
 ### Projects and labels
 
 ```bash

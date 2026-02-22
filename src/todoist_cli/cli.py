@@ -93,6 +93,14 @@ def _normalize_comment_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def _ensure_comment_marker(text: str, marker: str) -> str:
+    """Ensure comment starts with a marker prefix."""
+    stripped = text.strip()
+    if _normalize_comment_text(stripped).startswith(_normalize_comment_text(marker)):
+        return stripped
+    return f"{marker} {stripped}"
+
+
 def _is_similar_comment(existing: str, proposed: str, threshold: float = 0.94) -> bool:
     """Return True when comment bodies are effectively the same."""
     a = _normalize_comment_text(existing)
@@ -112,6 +120,81 @@ def _collect_task_comments(api: TodoistAPI, task_id: str) -> list:
     for page in api.get_comments(task_id=task_id):
         task_comments.extend(page)
     return sorted(task_comments, key=lambda c: str(getattr(c, "posted_at", "")), reverse=True)
+
+
+def _write_task_comment(
+    api: TodoistAPI,
+    task_id: str,
+    text: str,
+    *,
+    mode: str = "append",
+    dedupe: bool = True,
+    recent: int = 5,
+) -> tuple[str, str]:
+    """Write comment based on mode and return action + comment id."""
+    task_comments = _collect_task_comments(api, task_id)
+    if dedupe:
+        for existing in task_comments[:recent]:
+            if _is_similar_comment(str(getattr(existing, "content", "")), text):
+                return "skipped_duplicate", str(existing.id)
+
+    if mode == "append":
+        created = api.add_comment(task_id=task_id, content=text)
+        return "added", str(created.id)
+
+    if mode == "update-last":
+        if not task_comments:
+            created = api.add_comment(task_id=task_id, content=text)
+            return "added", str(created.id)
+        latest = task_comments[0]
+        updated = api.update_comment(comment_id=latest.id, content=text)
+        return "updated_latest", str(updated.id)
+
+    # mode == overwrite-latest-plan
+    plan_markers = ("[openclaw:plan]", "next action", "plan/next steps", "next step")
+    target = next(
+        (
+            c
+            for c in task_comments
+            if any(marker in _normalize_comment_text(str(getattr(c, "content", ""))) for marker in plan_markers)
+        ),
+        None,
+    )
+    if target is None:
+        created = api.add_comment(task_id=task_id, content=text)
+        return "added", str(created.id)
+    updated = api.update_comment(comment_id=target.id, content=text)
+    return "overwrote_plan", str(updated.id)
+
+
+def _infer_progress_type(text: str) -> str:
+    """Infer whether content looks like a plan snapshot or progress update."""
+    normalized = _normalize_comment_text(text)
+    progress_cues = (
+        "done",
+        "completed",
+        "finished",
+        "sent",
+        "posted",
+        "created",
+        "opened",
+        "merged",
+        "closed",
+        "confirmed",
+        "found",
+        "verified",
+        "updated",
+        "replied",
+        "pinged",
+        "shared",
+        "result",
+        "outcome",
+    )
+    if "http://" in normalized or "https://" in normalized:
+        return "progress"
+    if any(cue in normalized for cue in progress_cues):
+        return "progress"
+    return "plan"
 
 
 # --- List Command ---
@@ -942,47 +1025,64 @@ def comment(
         dedupe = False
 
     try:
-        task_comments = _collect_task_comments(api, task_id)
-
-        if dedupe:
-            for existing in task_comments[:recent]:
-                if _is_similar_comment(str(getattr(existing, "content", "")), text):
-                    console.print(f"[yellow]Skipped duplicate comment:[/yellow] {existing.id}")
-                    return
-
-        if mode == "append":
-            created = api.add_comment(task_id=task_id, content=text)
-            console.print(f"[green]Added comment:[/green] {created.id}")
-            return
-
-        if mode == "update-last":
-            if not task_comments:
-                created = api.add_comment(task_id=task_id, content=text)
-                console.print(f"[yellow]No existing comments; added comment:[/yellow] {created.id}")
-                return
-            latest = task_comments[0]
-            updated = api.update_comment(comment_id=latest.id, content=text)
-            console.print(f"[green]Updated latest comment:[/green] {updated.id}")
-            return
-
-        # mode == "overwrite-latest-plan"
-        plan_markers = ("next action", "plan/next steps", "next step")
-        target = next(
-            (
-                c
-                for c in task_comments
-                if any(marker in _normalize_comment_text(str(getattr(c, "content", ""))) for marker in plan_markers)
-            ),
-            None,
-        )
-        if target is None:
-            created = api.add_comment(task_id=task_id, content=text)
-            console.print(f"[yellow]No plan-like comment found; added comment:[/yellow] {created.id}")
-            return
-        updated = api.update_comment(comment_id=target.id, content=text)
-        console.print(f"[green]Overwrote plan comment:[/green] {updated.id}")
+        action, comment_id = _write_task_comment(api, task_id, text, mode=mode, dedupe=dedupe, recent=recent)
+        if action == "skipped_duplicate":
+            console.print(f"[yellow]Skipped duplicate comment:[/yellow] {comment_id}")
+        elif action == "added":
+            console.print(f"[green]Added comment:[/green] {comment_id}")
+        elif action == "updated_latest":
+            console.print(f"[green]Updated latest comment:[/green] {comment_id}")
+        elif action == "overwrote_plan":
+            console.print(f"[green]Overwrote plan comment:[/green] {comment_id}")
     except Exception as e:
         console.print(f"[red]Failed to write comment: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def progress(
+    task_id: str = typer.Argument(..., help="Task ID"),
+    text: str = typer.Argument(..., help="Progress or plan text"),
+    entry_type: str = typer.Option("auto", "--type", help="Entry type: auto | plan | progress"),
+    mode: Optional[str] = typer.Option(None, "--mode", help="Override write mode: append | update-last | overwrite-latest-plan"),
+    dedupe: bool = typer.Option(True, "--dedupe/--no-dedupe", help="Skip near-duplicate comment writes"),
+    recent: int = typer.Option(5, "--recent", min=1, max=20, help="Number of recent comments to check for dedupe"),
+    force: bool = typer.Option(False, "--force", help="Bypass dedupe checks"),
+    close: bool = typer.Option(False, "--close", help="Close task after successful write"),
+):
+    """Write a smart plan/progress comment with optional close-after-comment."""
+    api = get_api()
+    valid_types = {"auto", "plan", "progress"}
+    valid_modes = {"append", "update-last", "overwrite-latest-plan"}
+    entry_type = entry_type.strip().lower()
+    if entry_type not in valid_types:
+        console.print(f"[red]Invalid --type '{entry_type}'. Use one of: {', '.join(sorted(valid_types))}[/red]")
+        raise typer.Exit(1)
+    if mode is not None:
+        mode = mode.strip().lower()
+        if mode not in valid_modes:
+            console.print(f"[red]Invalid --mode '{mode}'. Use one of: {', '.join(sorted(valid_modes))}[/red]")
+            raise typer.Exit(1)
+    if force:
+        dedupe = False
+
+    inferred_type = _infer_progress_type(text) if entry_type == "auto" else entry_type
+    marker = "[openclaw:plan]" if inferred_type == "plan" else "[openclaw:progress]"
+    content = _ensure_comment_marker(text, marker)
+    write_mode = mode or ("overwrite-latest-plan" if inferred_type == "plan" else "append")
+
+    try:
+        action, comment_id = _write_task_comment(api, task_id, content, mode=write_mode, dedupe=dedupe, recent=recent)
+        console.print(
+            f"[green]Progress write:[/green] action={action} type={inferred_type} mode={write_mode} comment_id={comment_id}"
+        )
+        if close and action != "skipped_duplicate":
+            api.complete_task(task_id)
+            console.print(f"[green]Closed task:[/green] {task_id}")
+        elif close and action == "skipped_duplicate":
+            console.print("[yellow]Task left open:[/yellow] skipped duplicate comment")
+    except Exception as e:
+        console.print(f"[red]Failed to write progress: {e}[/red]")
         raise typer.Exit(1)
 
 
