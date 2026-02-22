@@ -22,6 +22,7 @@ from .formatting import (
     print_labels,
     print_comments,
     print_task_detail,
+    canonical_task_url,
     console,
 )
 from .audit import run_audit, print_audit
@@ -396,6 +397,7 @@ def add(
 
     task = api.add_task(**kwargs)
     console.print(f"[green]Created task:[/green] {task.id} - {task.content}")
+    console.print(f"[bold]Task link:[/bold] {task.content} - {canonical_task_url(task.id)}")
     if task.description:
         console.print(f"[dim]Description: {task.description}[/dim]")
     if task.deadline:
@@ -468,6 +470,7 @@ def add_focus(
 
     task = api.add_task(**kwargs)
     console.print(f"[green]Created task:[/green] {task.id} - {task.content}")
+    console.print(f"[bold]Task link:[/bold] {task.content} - {canonical_task_url(task.id)}")
 
     client = get_autodoist_client()
     try:
@@ -479,8 +482,7 @@ def add_focus(
     console.print(f"[green]Set focus:[/green] {task.id}")
     if focus_result.get("message"):
         console.print(f"[dim]{focus_result['message']}[/dim]")
-    if task.url:
-        console.print(f"[bold]URL:[/bold] {task.url}")
+    console.print(f"[bold]Task link:[/bold] {task.content} - {canonical_task_url(task.id)}")
 
 
 # --- Quick Add Command ---
@@ -496,6 +498,7 @@ def quick(
 
     task = api.add_task(content=text)
     console.print(f"[green]Created task:[/green] {task.id} - {task.content}")
+    console.print(f"[bold]Task link:[/bold] {task.content} - {canonical_task_url(task.id)}")
 
 
 # --- Show Command ---

@@ -22,6 +22,11 @@ PRIORITY_LABELS = {
 }
 
 
+def canonical_task_url(task_id: str) -> str:
+    """Return canonical Todoist web URL for a task id."""
+    return f"https://todoist.com/showTask?id={task_id}"
+
+
 def format_priority(priority: int) -> Text:
     """Format priority with color."""
     label = PRIORITY_LABELS.get(priority, "p4")
@@ -211,4 +216,4 @@ def print_task_detail(task: Task, comments: list[Comment] | None = None, project
         for comment in comments:
             console.print(f"  [{comment.posted_at}] {comment.content}")
 
-    console.print(f"\n[bold]URL:[/bold] {task.url}")
+    console.print(f"\n[bold]URL:[/bold] {canonical_task_url(task.id)}")

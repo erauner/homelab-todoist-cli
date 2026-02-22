@@ -163,6 +163,8 @@ class TestAdd:
         result = runner.invoke(app, ["add", "New task"])
         assert result.exit_code == 0
         assert "Created task" in result.output
+        assert "Task link:" in result.output
+        assert "https://todoist.com/showTask?id=123" in result.output
         mock_api.add_task.assert_called_once()
         call_kwargs = mock_api.add_task.call_args[1]
         assert call_kwargs["content"] == "New task"
@@ -258,6 +260,8 @@ class TestAdd:
         assert result.exit_code == 0
         assert "Created task" in result.output
         assert "Set focus" in result.output
+        assert "Task link:" in result.output
+        assert "https://todoist.com/showTask?id=new123" in result.output
         mock_auto.task_label_action.assert_called_once_with(task_id="new123", action="make_winner")
 
     def test_add_focus_fails_when_focus_action_fails(self, mock_api, mock_token):
@@ -362,6 +366,7 @@ class TestShow:
         assert result.exit_code == 0
         assert "Test task" in result.output
         assert "Task description" in result.output
+        assert "https://todoist.com/showTask?id=123" in result.output
 
     def test_show_task_with_comments(self, mock_api, mock_token):
         """Show displays task with comments."""
