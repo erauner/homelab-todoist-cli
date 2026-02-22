@@ -129,6 +129,10 @@ td progress <task_id> "Created DECOMM-42 and shared link"      # auto: progress 
 td progress <task_id> "Final update posted" --type progress --close
 ```
 
+Notes:
+- Multi-line descriptions/comments are preserved as readable paragraphs.
+- Excess whitespace is cleaned, and duplicate blank lines are collapsed.
+
 ### Projects and labels
 
 ```bash

@@ -83,19 +83,50 @@ def sync_api_command(token: str, command_type: str, args: dict) -> dict:
     return response.json()
 
 
+def _normalize_rich_text(text: str) -> str:
+    """Normalize multi-line text while preserving readability structure."""
+    raw = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not raw:
+        return ""
+
+    # If user gave one giant paragraph, break sentence boundaries for readability.
+    if "\n" not in raw and len(raw) > 220:
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", raw)
+        if len(sentences) > 1:
+            raw = "\n\n".join(s.strip() for s in sentences if s.strip())
+
+    lines: list[str] = []
+    blank_pending = False
+    for original in raw.split("\n"):
+        line = original.strip()
+        if not line:
+            if lines:
+                blank_pending = True
+            continue
+
+        # Normalize horizontal whitespace without collapsing paragraph boundaries.
+        line = re.sub(r"[ \t]+", " ", line)
+        if blank_pending and lines:
+            lines.append("")
+            blank_pending = False
+        lines.append(line)
+
+    return "\n".join(lines).strip()
+
+
 def _normalize_description(description: str) -> str:
-    """Collapse excess whitespace in task descriptions for cleaner rendering."""
-    return re.sub(r"\s+", " ", description).strip()
+    """Normalize description text while preserving intentional paragraph breaks."""
+    return _normalize_rich_text(description)
 
 
 def _normalize_comment_text(text: str) -> str:
     """Normalize comment text for stable duplicate checks."""
-    return re.sub(r"\s+", " ", text).strip().lower()
+    return re.sub(r"\s+", " ", _normalize_rich_text(text)).strip().lower()
 
 
 def _ensure_comment_marker(text: str, marker: str) -> str:
     """Ensure comment starts with a marker prefix."""
-    stripped = text.strip()
+    stripped = _normalize_rich_text(text)
     if _normalize_comment_text(stripped).startswith(_normalize_comment_text(marker)):
         return stripped
     return f"{marker} {stripped}"
@@ -132,6 +163,7 @@ def _write_task_comment(
     recent: int = 5,
 ) -> tuple[str, str]:
     """Write comment based on mode and return action + comment id."""
+    text = _normalize_rich_text(text)
     task_comments = _collect_task_comments(api, task_id)
     if dedupe:
         for existing in task_comments[:recent]:

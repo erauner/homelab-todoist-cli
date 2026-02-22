@@ -182,7 +182,7 @@ class TestAdd:
         assert call_kwargs["description"] == "This is the description"
 
     def test_add_normalizes_multiline_description(self, mock_api, mock_token):
-        """Add collapses multiline description whitespace for readability."""
+        """Add preserves paragraph breaks while normalizing whitespace."""
         mock_api.add_task.return_value = make_mock_task(content="Task with desc")
 
         result = runner.invoke(
@@ -191,7 +191,7 @@ class TestAdd:
         )
         assert result.exit_code == 0
         call_kwargs = mock_api.add_task.call_args[1]
-        assert call_kwargs["description"] == "Line one Line two Line three"
+        assert call_kwargs["description"] == "Line one\n\nLine two Line three"
 
     def test_add_with_due_date(self, mock_api, mock_token):
         """Add creates task with due date."""
@@ -273,7 +273,7 @@ class TestAdd:
         assert "Failed to set focus for new task" in result.output
 
     def test_add_focus_normalizes_multiline_description(self, mock_api, mock_token):
-        """add-focus collapses multiline description whitespace before creating task."""
+        """add-focus preserves paragraph breaks while cleaning line whitespace."""
         mock_api.add_task.return_value = make_mock_task(id="new123", content="Focus task")
         mock_auto = MagicMock()
         mock_auto.task_label_action.return_value = {
@@ -291,7 +291,7 @@ class TestAdd:
 
         assert result.exit_code == 0
         call_kwargs = mock_api.add_task.call_args[1]
-        assert call_kwargs["description"] == "Do this right away"
+        assert call_kwargs["description"] == "Do this\n\nright away"
 
     def test_add_focus_with_parent_id_creates_subtask(self, mock_api, mock_token):
         """add-focus passes parent_id so focused task can be a subtask."""
@@ -408,7 +408,7 @@ class TestModify:
         assert call_kwargs["description"] == "New description"
 
     def test_modify_normalizes_multiline_description(self, mock_api, mock_token):
-        """Modify collapses multiline description whitespace for readability."""
+        """Modify preserves paragraph breaks while normalizing whitespace."""
         mock_api.update_task.return_value = make_mock_task(description="New description")
 
         result = runner.invoke(
@@ -417,7 +417,7 @@ class TestModify:
         )
         assert result.exit_code == 0
         call_kwargs = mock_api.update_task.call_args[1]
-        assert call_kwargs["description"] == "New description value"
+        assert call_kwargs["description"] == "New\n\ndescription value"
 
     def test_modify_priority(self, mock_api, mock_token):
         """Modify updates task priority."""
@@ -479,6 +479,17 @@ class TestComment:
         assert result.exit_code == 0
         assert "Added comment" in result.output
         mock_api.add_comment.assert_called_once_with(task_id="123", content="My comment")
+
+    def test_add_comment_preserves_paragraph_breaks(self, mock_api, mock_token):
+        """Comment keeps readable paragraph breaks instead of one giant line."""
+        mock_api.add_comment.return_value = make_mock_comment(id="c1", content="My comment")
+
+        result = runner.invoke(app, ["comment", "123", "Line one\n\n  Line two\tline three"])
+        assert result.exit_code == 0
+        mock_api.add_comment.assert_called_once_with(
+            task_id="123",
+            content="Line one\n\nLine two line three",
+        )
 
     def test_comment_dedupe_skips_similar(self, mock_api, mock_token):
         """Comment skips near-duplicate writes by default."""
@@ -591,6 +602,20 @@ class TestProgress:
         mock_api.update_comment.assert_called_once()
         assert mock_api.update_comment.call_args.kwargs["comment_id"] == "c-plan"
         assert mock_api.update_comment.call_args.kwargs["content"].startswith("[openclaw:plan]")
+
+    def test_progress_normalizes_multiline_text(self, mock_api, mock_token):
+        """Progress preserves paragraph breaks while cleaning whitespace."""
+        mock_api.get_comments.return_value = iter([[]])
+        mock_api.add_comment.return_value = make_mock_comment(id="c2", content="[openclaw:progress] done")
+
+        result = runner.invoke(
+            app,
+            ["progress", "123", "Done: posted update\n\n  Shared link\tin thread", "--type", "progress"],
+        )
+        assert result.exit_code == 0
+        content = mock_api.add_comment.call_args.kwargs["content"]
+        assert content.startswith("[openclaw:progress] ")
+        assert "Done: posted update\n\nShared link in thread" in content
 
     def test_progress_auto_infers_progress_and_appends(self, mock_api, mock_token):
         """Auto mode infers progress from status wording and appends."""
