@@ -34,9 +34,9 @@ def format_due(due) -> str:
     if not due:
         return ""
     if hasattr(due, "datetime") and due.datetime:
-        return due.datetime
+        return str(due.datetime)
     if hasattr(due, "date"):
-        return due.date
+        return str(due.date)
     return str(due)
 
 
@@ -45,7 +45,7 @@ def format_deadline(deadline) -> str:
     if not deadline:
         return ""
     if hasattr(deadline, "date"):
-        return deadline.date
+        return str(deadline.date)
     return str(deadline)
 
 

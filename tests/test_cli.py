@@ -877,6 +877,30 @@ class TestToday:
         assert "Today task" in result.output
 
 
+class TestNextActions:
+    """Tests for next command."""
+
+    def test_next_table_handles_date_due(self, mock_api, mock_token):
+        """Next table renders when due.date is a Python date instance."""
+        from datetime import date
+
+        due_obj = MagicMock()
+        due_obj.datetime = None
+        due_obj.date = date(2026, 2, 24)
+
+        mock_api.get_projects.return_value = iter([[
+            make_mock_project(id="proj1", name="Work"),
+        ]])
+        mock_api.get_tasks.return_value = iter([[
+            make_mock_task(id="1", content="Focused task", project_id="proj1", due=due_obj, labels=["next_action"]),
+        ]])
+
+        result = runner.invoke(app, ["next", "--table"])
+        assert result.exit_code == 0
+        assert "2026-02-24" in result.output
+        assert "NotRenderableError" not in result.output
+
+
 class TestUpcoming:
     """Tests for upcoming command."""
 
