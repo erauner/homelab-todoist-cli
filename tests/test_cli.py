@@ -1231,6 +1231,121 @@ class TestUpcoming:
         assert "Far future task" not in result.output
 
 
+class TestSuggestTime:
+    """Tests for suggest-time command."""
+
+    def test_suggest_time_for_specific_task(self, mock_api, mock_token):
+        """Suggest-time returns deterministic slots around existing timed tasks."""
+        busy_due = make_mock_due(date="2026-02-23", datetime="2026-02-23T10:00:00+00:00")
+        busy_duration = MagicMock()
+        busy_duration.amount = 60
+        busy_duration.unit = "minute"
+        blocker = make_mock_task(id="busy1", content="Meeting", due=busy_due, duration=busy_duration)
+
+        target_duration = MagicMock()
+        target_duration.amount = 30
+        target_duration.unit = "minute"
+        target = make_mock_task(id="t1", content="Write plan", due=None, duration=target_duration)
+
+        mock_api.get_tasks.return_value = iter([[blocker]])
+        mock_api.get_task.return_value = target
+
+        result = runner.invoke(
+            app,
+            [
+                "suggest-time",
+                "t1",
+                "--day",
+                "2026-02-23",
+                "--timezone",
+                "UTC",
+                "--work-start",
+                "09:00",
+                "--work-end",
+                "12:00",
+                "--top",
+                "2",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Suggested start times" in result.output
+        assert "09:00" in result.output
+        assert "11:00" in result.output
+
+    def test_suggest_time_auto_day_plan_prioritizes_overdue(self, mock_api, mock_token):
+        """Auto mode should schedule overdue unscheduled tasks before today's unscheduled tasks."""
+        from datetime import date
+
+        today = date.today().isoformat()
+        timed_due = make_mock_due(date=today, datetime=f"{today}T09:00:00+00:00")
+        timed_duration = MagicMock()
+        timed_duration.amount = 30
+        timed_duration.unit = "minute"
+
+        blocker = make_mock_task(id="busy1", content="Standup", due=timed_due, duration=timed_duration)
+        overdue = make_mock_task(id="o1", content="Overdue task", due=make_mock_due(date="2000-01-01"), priority=2)
+        today_unscheduled = make_mock_task(id="d1", content="Today task", due=make_mock_due(date=today), priority=4)
+
+        mock_api.get_tasks.return_value = iter([[blocker, today_unscheduled, overdue]])
+
+        result = runner.invoke(
+            app,
+            [
+                "suggest-time",
+                "--day",
+                "today",
+                "--timezone",
+                "UTC",
+                "--work-start",
+                "09:00",
+                "--work-end",
+                "11:00",
+                "-n",
+                "2",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Auto day-plan suggestions" in result.output
+        assert "Overdue task" in result.output
+        assert "Today task" in result.output
+        assert result.output.find("Overdue task") < result.output.find("Today task")
+
+    def test_suggest_time_invalid_day(self, mock_api, mock_token):
+        """Invalid day value returns a helpful error."""
+        result = runner.invoke(app, ["suggest-time", "--day", "not-a-date"])
+        assert result.exit_code == 1
+        assert "Invalid --day value" in result.output
+
+    def test_suggest_time_no_slot_available(self, mock_api, mock_token):
+        """No free time in the planning window reports no-slot outcome."""
+        busy_due = make_mock_due(date="2026-02-23", datetime="2026-02-23T09:00:00+00:00")
+        busy_duration = MagicMock()
+        busy_duration.amount = 540
+        busy_duration.unit = "minute"
+        blocker = make_mock_task(id="busy1", content="All day", due=busy_due, duration=busy_duration)
+        target = make_mock_task(id="t1", content="Write plan", due=None, duration=None)
+        mock_api.get_tasks.return_value = iter([[blocker]])
+        mock_api.get_task.return_value = target
+
+        result = runner.invoke(
+            app,
+            [
+                "suggest-time",
+                "t1",
+                "--day",
+                "2026-02-23",
+                "--timezone",
+                "UTC",
+                "--work-start",
+                "09:00",
+                "--work-end",
+                "18:00",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "No slot available" in result.output
+
+
 class TestRecent:
     """Tests for recent command."""
 

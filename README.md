@@ -113,6 +113,22 @@ td modify <task_id> --parent-id <parent_task_id>   # Reparent as subtask
 td reparent <task_id> <parent_task_id>             # Explicit reparent command
 ```
 
+### Suggest time slots (duration + due-aware)
+
+```bash
+td suggest-time <task_id> --day today
+td suggest-time <task_id> --day tomorrow --timezone America/Chicago
+td suggest-time <task_id> --day 2026-02-24 --work-start 08:30 --work-end 17:30
+
+# Auto mode (no task id): suggest slots for overdue + today unscheduled tasks
+td suggest-time --day today --timezone America/Chicago -n 5
+```
+
+Notes:
+- Uses existing timed tasks as busy constraints.
+- Uses task `duration` when present (defaults to 30m otherwise).
+- Auto mode prioritizes: `@focus` first, then most overdue, then earlier due date, then higher priority.
+
 ### Comments
 
 ```bash

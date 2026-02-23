@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from typing import Optional
 import uuid
+from zoneinfo import ZoneInfo
 import typer
 import requests
 from rich.console import Console
@@ -254,6 +255,120 @@ def _infer_progress_type(text: str) -> str:
     if any(cue in normalized for cue in progress_cues):
         return "progress"
     return "plan"
+
+
+def _parse_iso_date(value: object) -> Optional[date]:
+    """Parse a date-like value into a date object."""
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_hhmm(value: str) -> Optional[tuple[int, int]]:
+    """Parse HH:MM to (hour, minute)."""
+    raw = value.strip()
+    if not raw or ":" not in raw:
+        return None
+    hh, mm = raw.split(":", 1)
+    try:
+        hour = int(hh)
+        minute = int(mm)
+    except ValueError:
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return (hour, minute)
+
+
+def _task_due_datetime_local(task: object, tz_name: str) -> Optional[datetime]:
+    """Return task due datetime converted to local timezone."""
+    due = getattr(task, "due", None)
+    if due is None:
+        return None
+    due_dt = getattr(due, "datetime", None)
+    if not due_dt:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(due_dt).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo(tz_name))
+        return parsed.astimezone(ZoneInfo(tz_name))
+    except Exception:
+        return None
+
+
+def _task_due_date(task: object) -> Optional[date]:
+    """Return due date from task due payload."""
+    due = getattr(task, "due", None)
+    if due is None:
+        return None
+    return _parse_iso_date(getattr(due, "date", None))
+
+
+def _task_duration_minutes(task: object, default_minutes: int = 30) -> int:
+    """Return duration in minutes (Todoist day unit approximated to 8h/day)."""
+    duration = getattr(task, "duration", None)
+    if duration is None:
+        return max(5, default_minutes)
+    amount = getattr(duration, "amount", None)
+    unit = getattr(duration, "unit", None)
+    try:
+        amount_i = int(amount)
+    except (TypeError, ValueError):
+        return max(5, default_minutes)
+    if amount_i <= 0:
+        return max(5, default_minutes)
+    if unit == "minute":
+        return amount_i
+    if unit == "day":
+        return amount_i * 8 * 60
+    return max(5, default_minutes)
+
+
+def _compute_free_intervals(
+    busy_intervals: list[tuple[datetime, datetime]],
+    day_start: datetime,
+    day_end: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """Compute free intervals within [day_start, day_end)."""
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in sorted(busy_intervals, key=lambda x: x[0]):
+        if end <= day_start or start >= day_end:
+            continue
+        start = max(start, day_start)
+        end = min(end, day_end)
+        if end <= start:
+            continue
+        if not merged:
+            merged.append((start, end))
+            continue
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+
+    free: list[tuple[datetime, datetime]] = []
+    cursor = day_start
+    for start, end in merged:
+        if start > cursor:
+            free.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < day_end:
+        free.append((cursor, day_end))
+    return free
+
+
+def _format_slot(dt: datetime) -> str:
+    """Format slot timestamp for CLI output."""
+    return dt.strftime("%H:%M")
 
 
 # --- List Command ---
@@ -1018,6 +1133,187 @@ def recent(
         created = task.created_at[:10] if task.created_at else ""
         console.print(f"[dim]{created}[/dim] ", end="")
         print_task(task, show_description=show_description, project_name=project_name)
+
+
+# --- Suggest Time Command ---
+@app.command(name="suggest-time")
+def suggest_time(
+    task_id: Optional[str] = typer.Argument(None, help="Task ID to suggest slot for (omit for auto day-plan mode)"),
+    day: str = typer.Option("today", "--day", help="Target day: today | tomorrow | YYYY-MM-DD"),
+    timezone: str = typer.Option("America/Chicago", "--timezone", help="IANA timezone (e.g., America/Chicago)"),
+    work_start: str = typer.Option("09:00", "--work-start", help="Start of planning window (HH:MM)"),
+    work_end: str = typer.Option("18:00", "--work-end", help="End of planning window (HH:MM)"),
+    default_duration: int = typer.Option(30, "--default-duration", min=5, help="Default duration minutes when task has no duration"),
+    busy_default_duration: int = typer.Option(30, "--busy-default-duration", min=5, help="Default block minutes for timed tasks with no duration"),
+    top: int = typer.Option(3, "--top", "-n", min=1, max=10, help="Max suggestions"),
+):
+    """Suggest schedule slots using current due-times + duration constraints.
+
+    Modes:
+    - With task_id: suggest best slot(s) for that task.
+    - Without task_id: auto-assign slots for overdue/today unscheduled tasks.
+    """
+    api = get_api()
+
+    try:
+        tz = ZoneInfo(timezone)
+    except Exception:
+        console.print(f"[red]Invalid timezone:[/red] {timezone}")
+        raise typer.Exit(1)
+
+    start_parts = _parse_hhmm(work_start)
+    end_parts = _parse_hhmm(work_end)
+    if start_parts is None or end_parts is None:
+        console.print("[red]Invalid work window. Use HH:MM for --work-start/--work-end[/red]")
+        raise typer.Exit(1)
+    if start_parts >= end_parts:
+        console.print("[red]--work-start must be earlier than --work-end[/red]")
+        raise typer.Exit(1)
+
+    now_local = datetime.now(tz)
+    day_lower = day.strip().lower()
+    if day_lower == "today":
+        target_day = now_local.date()
+    elif day_lower == "tomorrow":
+        target_day = now_local.date() + timedelta(days=1)
+    else:
+        parsed_day = _parse_iso_date(day)
+        if parsed_day is None:
+            console.print("[red]Invalid --day value. Use today, tomorrow, or YYYY-MM-DD[/red]")
+            raise typer.Exit(1)
+        target_day = parsed_day
+
+    day_start = datetime(target_day.year, target_day.month, target_day.day, start_parts[0], start_parts[1], tzinfo=tz)
+    day_end = datetime(target_day.year, target_day.month, target_day.day, end_parts[0], end_parts[1], tzinfo=tz)
+
+    tasks = []
+    for page in api.get_tasks():
+        tasks.extend(page)
+
+    busy_intervals: list[tuple[datetime, datetime]] = []
+    for task in tasks:
+        due_dt = _task_due_datetime_local(task, timezone)
+        if due_dt is None or due_dt.date() != target_day:
+            continue
+        duration_minutes = _task_duration_minutes(task, default_minutes=busy_default_duration)
+        busy_intervals.append((due_dt, due_dt + timedelta(minutes=duration_minutes)))
+
+    free_intervals = _compute_free_intervals(busy_intervals, day_start, day_end)
+
+    if task_id:
+        try:
+            target_task = api.get_task(task_id)
+        except Exception:
+            console.print(f"[red]Task not found:[/red] {task_id}")
+            raise typer.Exit(1)
+
+        needed_minutes = _task_duration_minutes(target_task, default_minutes=default_duration)
+        suggestions: list[datetime] = []
+        for start, end in free_intervals:
+            if int((end - start).total_seconds() // 60) >= needed_minutes:
+                suggestions.append(start)
+                if len(suggestions) >= top:
+                    break
+
+        due_dt_existing = _task_due_datetime_local(target_task, timezone)
+        due_date_existing = _task_due_date(target_task)
+        due_status = "none"
+        if due_dt_existing is not None:
+            due_status = due_dt_existing.strftime("%Y-%m-%d %H:%M")
+        elif due_date_existing is not None:
+            due_status = due_date_existing.isoformat()
+
+        console.print(f"[bold]Task:[/bold] {target_task.content} ({task_id})")
+        console.print(f"[bold]Target day:[/bold] {target_day.isoformat()} [{timezone}]")
+        console.print(f"[bold]Current due:[/bold] {due_status}")
+        console.print(f"[bold]Duration used:[/bold] {needed_minutes}m")
+        if not suggestions:
+            console.print("[yellow]No slot available in the selected window.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print("\n[bold green]Suggested start times:[/bold green]")
+        for i, slot in enumerate(suggestions, start=1):
+            console.print(f"{i}. {slot.strftime('%Y-%m-%d')} {_format_slot(slot)}")
+        return
+
+    # Auto day-plan mode: prioritize overdue first, then today/no-time tasks.
+    unscheduled = []
+    for task in tasks:
+        due_dt = _task_due_datetime_local(task, timezone)
+        if due_dt is not None:
+            continue
+        due_date = _task_due_date(task)
+        if due_date is None:
+            continue
+        if due_date > target_day:
+            continue
+        overdue_days = max(0, (now_local.date() - due_date).days)
+        labels = set(getattr(task, "labels", []) or [])
+        unscheduled.append(
+            (
+                task,
+                overdue_days,
+                getattr(task, "priority", 1),
+                "focus" in labels,
+                "next_action" in labels,
+                due_date,
+            )
+        )
+
+    if not unscheduled:
+        console.print("[dim]No overdue/today unscheduled tasks to auto-slot.[/dim]")
+        return
+
+    unscheduled.sort(
+        key=lambda row: (
+            -int(row[3]),  # focus first
+            -row[1],       # more overdue first
+            row[5],        # earlier due date first
+            -row[2],       # higher priority first
+            -int(row[4]),  # next_action bias
+            str(row[0].content).lower(),
+        )
+    )
+
+    remaining = free_intervals[:]
+    plan_rows = []
+    for task, overdue_days, priority, is_focus, is_next, due_date in unscheduled:
+        needed = _task_duration_minutes(task, default_minutes=default_duration)
+        assigned = None
+        for idx, (slot_start, slot_end) in enumerate(remaining):
+            minutes_available = int((slot_end - slot_start).total_seconds() // 60)
+            if minutes_available < needed:
+                continue
+            assigned = slot_start
+            new_start = slot_start + timedelta(minutes=needed)
+            if new_start >= slot_end:
+                remaining.pop(idx)
+            else:
+                remaining[idx] = (new_start, slot_end)
+            break
+        if assigned is None:
+            continue
+        plan_rows.append((task, assigned, needed, overdue_days, is_focus, is_next, due_date))
+        if len(plan_rows) >= top:
+            break
+
+    if not plan_rows:
+        console.print("[yellow]No available slot for overdue/today unscheduled tasks.[/yellow]")
+        return
+
+    console.print(f"[bold]Auto day-plan suggestions:[/bold] {target_day.isoformat()} [{timezone}]")
+    for i, (task, start, minutes, overdue_days, is_focus, is_next, due_date) in enumerate(plan_rows, start=1):
+        flags = []
+        if is_focus:
+            flags.append("focus")
+        if is_next:
+            flags.append("next_action")
+        if overdue_days > 0:
+            flags.append(f"overdue:{overdue_days}d")
+        flag_text = f" [{' '.join(flags)}]" if flags else ""
+        console.print(
+            f"{i}. {_format_slot(start)} ({minutes}m) {task.content}{flag_text} (due {due_date.isoformat()})"
+        )
 
 
 # --- Delete Command ---
