@@ -11,6 +11,8 @@ import typer
 import requests
 from rich.console import Console
 from todoist_api_python.api import TodoistAPI
+from todoist_core.models import TaskContext
+from todoist_core.selectors import rank_next_action_candidates
 
 from . import __version__
 from .autodoist import AutodoistClient, AutodoistClientError
@@ -322,6 +324,26 @@ def _task_duration_minutes(task: object, default_minutes: int = 30) -> int:
     if unit == "day":
         return amount_i * 8 * 60
     return max(5, default_minutes)
+
+
+def _to_task_context(task: object) -> TaskContext:
+    """Convert Todoist SDK task object into shared TaskContext."""
+    due = getattr(task, "due", None)
+    due_date = _parse_iso_date(getattr(due, "date", None) if due is not None else None)
+    due_dt_local = None
+    if due is not None and getattr(due, "datetime", None):
+        due_dt_local = _task_due_datetime_local(task, "America/Chicago")
+    return TaskContext(
+        id=str(getattr(task, "id", "")),
+        content=str(getattr(task, "content", "")),
+        labels=tuple(getattr(task, "labels", []) or []),
+        project_id=str(getattr(task, "project_id", "")) or None,
+        due_date=due_date,
+        due_datetime_local=due_dt_local,
+        duration_minutes=_task_duration_minutes(task, default_minutes=30),
+        priority=int(getattr(task, "priority", 1) or 1),
+        url=canonical_task_url(str(getattr(task, "id", ""))),
+    )
 
 
 def _compute_free_intervals(
@@ -1807,6 +1829,99 @@ def autodoist_tasks(
         labels = ",".join(task.get("labels", []))
         updated = task.get("updated_at", "n/a")
         console.print(f"{task.get('id', '')} [{updated}] @{labels} {task.get('content', '')}")
+
+
+@autodoist_app.command("checkin")
+def autodoist_checkin(
+    limit: int = typer.Option(3, "--limit", "-n", min=1, max=10, help="Max candidate tasks when no focus"),
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON"),
+):
+    """Ad-hoc focus check-in: show current focus, or suggest next-action candidates."""
+    client = get_autodoist_client()
+    api = get_api()
+    try:
+        state = client.state()
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to fetch Autodoist state:[/red] {exc}")
+        raise typer.Exit(1)
+
+    labels = state.get("labels", {}) or {}
+    next_action_label = labels.get("next_action_label", "next_action")
+    focus_label = labels.get("focus_label") or labels.get("doing_now_label", "focus")
+
+    try:
+        focus_payload = client.tasks(label=focus_label, contains=None)
+    except AutodoistClientError as exc:
+        console.print(f"[red]Failed to fetch focus tasks:[/red] {exc}")
+        raise typer.Exit(1)
+
+    focus_tasks = focus_payload.get("tasks", []) or []
+    focus_ids = {str(t.get("id")) for t in focus_tasks if t.get("id") is not None}
+
+    next_tasks = []
+    for page in api.get_tasks(label=next_action_label):
+        next_tasks.extend(page)
+
+    today = date.today()
+    next_candidates = [task for task in next_tasks if str(getattr(task, "id", "")) not in focus_ids]
+    ranked_contexts = rank_next_action_candidates(tuple(_to_task_context(task) for task in next_candidates), today)
+    rank_order = {ctx.id: idx for idx, ctx in enumerate(ranked_contexts)}
+    next_candidates.sort(
+        key=lambda task: rank_order.get(str(getattr(task, "id", "")), 9999)
+    )
+
+    if json_output:
+        payload = {
+            "focus_label": focus_label,
+            "next_action_label": next_action_label,
+            "focus_tasks": focus_tasks,
+            "candidate_tasks": [
+                {
+                    "id": str(task.id),
+                    "content": task.content,
+                    "priority": int(getattr(task, "priority", 1) or 1),
+                    "due": getattr(getattr(task, "due", None), "date", None),
+                    "url": canonical_task_url(str(task.id)),
+                }
+                for task in next_candidates[:limit]
+            ],
+        }
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    if focus_tasks:
+        focus = focus_tasks[0]
+        focus_id = str(focus.get("id", ""))
+        focus_content = focus.get("content", "")
+        console.print(f"[bold]Current focus:[/bold] {focus_content}")
+        console.print(canonical_task_url(focus_id))
+        if next_candidates:
+            best = next_candidates[0]
+            console.print(
+                f"\n[bold]Best next after focus:[/bold] {best.content} ({best.id})"
+            )
+            console.print(canonical_task_url(str(best.id)))
+        return
+
+    console.print("[yellow]No current @focus task.[/yellow]")
+    if not next_candidates:
+        console.print("[dim]No @next_action candidates found.[/dim]")
+        return
+
+    console.print(f"[bold]Suggested {next_action_label} candidates:[/bold]")
+    for idx, task in enumerate(next_candidates[:limit], start=1):
+        due = getattr(task, "due", None)
+        due_date = getattr(due, "date", None) if due else None
+        reason = "unscheduled"
+        if due_date:
+            if str(due_date) < today.isoformat():
+                reason = "overdue"
+            elif str(due_date) == today.isoformat():
+                reason = "due today"
+            else:
+                reason = f"due {due_date}"
+        console.print(f"{idx}. {task.content} ({task.id}) [{reason}]")
+        console.print(f"   {canonical_task_url(str(task.id))}")
 
 
 @autodoist_app.command("focus")

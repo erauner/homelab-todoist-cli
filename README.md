@@ -168,6 +168,7 @@ td labels                   # List all labels
 td autodoist health
 td autodoist state
 td autodoist tasks --label focus
+td autodoist checkin               # ad-hoc: current focus or suggested next_action candidates
 td autodoist focus                 # dry-run reconcile
 td autodoist focus --apply         # apply reconcile
 td autodoist set-focus <task_id>   # force winner and reconcile

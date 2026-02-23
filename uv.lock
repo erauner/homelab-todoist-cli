@@ -219,6 +219,15 @@ wheels = [
 ]
 
 [[package]]
+name = "homelab-todoist-core"
+version = "0.1.0"
+source = { registry = "https://nexus.erauner.dev/repository/pypi-hosted/simple" }
+sdist = { url = "https://nexus.erauner.dev/repository/pypi-hosted/packages/homelab-todoist-core/0.1.0/homelab_todoist_core-0.1.0.tar.gz", hash = "sha256:3de308850bfa2d5302e08b494e02878d97e9410e84643acafc2f9a319dc281ba" }
+wheels = [
+    { url = "https://nexus.erauner.dev/repository/pypi-hosted/packages/homelab-todoist-core/0.1.0/homelab_todoist_core-0.1.0-py3-none-any.whl", hash = "sha256:9752bf7cbe1daf8fafce35b97e6da80417e99eca5cb3f692f822ea1f5468f09e" },
+]
+
+[[package]]
 name = "idna"
 version = "3.11"
 source = { registry = "https://pypi.org/simple" }
@@ -516,6 +525,7 @@ name = "todoist-cli"
 version = "0.8.20"
 source = { editable = "." }
 dependencies = [
+    { name = "homelab-todoist-core" },
     { name = "requests" },
     { name = "rich" },
     { name = "todoist-api-python" },
@@ -538,6 +548,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "homelab-todoist-core", specifier = "==0.1.0", index = "https://nexus.erauner.dev/repository/pypi-hosted/simple" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
