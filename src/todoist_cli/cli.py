@@ -173,14 +173,6 @@ def _clear_task_comments(api: TodoistAPI, task_id: str, *, keep_plan: bool = Fal
     return deleted, kept
 
 
-def _is_task_recurring(task: object) -> bool:
-    """Return True when task has a recurring due schedule."""
-    due = getattr(task, "due", None)
-    if due is None:
-        return False
-    return getattr(due, "is_recurring", False) is True
-
-
 def _write_task_comment(
     api: TodoistAPI,
     task_id: str,
@@ -653,7 +645,7 @@ def close(
     clear_comments: Optional[bool] = typer.Option(
         None,
         "--clear-comments/--no-clear-comments",
-        help="Delete task comments before completing (default: auto for recurring tasks)",
+        help="Delete task comments before completing (default: keep comments)",
     ),
     keep_plan: bool = typer.Option(
         False,
@@ -664,8 +656,7 @@ def close(
     """Complete/close a task.
 
     Default behavior:
-    - Recurring task: clear comments before close
-    - Non-recurring task: keep comments unless explicitly requested
+    - Keep comments unless explicitly requested with --clear-comments
     """
     api = get_api()
     if keep_plan and clear_comments is False:
@@ -673,15 +664,7 @@ def close(
         raise typer.Exit(1)
 
     try:
-        should_clear = False
-        if clear_comments is None:
-            task = api.get_task(task_id)
-            recurring = _is_task_recurring(task)
-            should_clear = recurring or keep_plan
-            if recurring:
-                console.print("[dim]Auto-clear enabled for recurring task comments[/dim]")
-        else:
-            should_clear = clear_comments or keep_plan
+        should_clear = (clear_comments is True) or keep_plan
 
         if should_clear:
             deleted, kept = _clear_task_comments(api, task_id, keep_plan=keep_plan)

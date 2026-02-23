@@ -147,7 +147,7 @@ td comments-clear <task_id> --yes --keep-plan                 # Keep [openclaw:p
 td progress <task_id> "Check DECOMM ticket status"             # auto: plan snapshot
 td progress <task_id> "Created DECOMM-42 and shared link"      # auto: progress log
 td progress <task_id> "Final update posted" --type progress --close
-td close <task_id>                                             # Recurring tasks auto-clear comments
+td close <task_id>                                             # Keep comments by default
 td close <task_id> --clear-comments --keep-plan                # Preserve [openclaw:plan]
 ```
 

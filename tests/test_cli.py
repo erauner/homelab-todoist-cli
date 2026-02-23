@@ -695,35 +695,15 @@ class TestClose:
     """Tests for close command."""
 
     def test_close_task(self, mock_api, mock_token):
-        """Close completes task and keeps comments for non-recurring tasks by default."""
-        mock_api.get_task.return_value = make_mock_task(id="123", due=None)
+        """Close completes task and keeps comments by default."""
         result = runner.invoke(app, ["close", "123"])
         assert result.exit_code == 0
         assert "Completed task" in result.output
         mock_api.complete_task.assert_called_once_with("123")
         mock_api.delete_comment.assert_not_called()
 
-    def test_close_auto_clears_for_recurring_task(self, mock_api, mock_token):
-        """Close auto-clears comments when task is recurring."""
-        due = make_mock_due(date="2026-02-23")
-        due.is_recurring = True
-        mock_api.get_task.return_value = make_mock_task(id="123", due=due)
-        mock_api.get_comments.return_value = iter([[
-            make_mock_comment(id="c1", content="log one"),
-            make_mock_comment(id="c2", content="log two"),
-        ]])
-
-        result = runner.invoke(app, ["close", "123"])
-        assert result.exit_code == 0
-        assert "Auto-clear enabled for recurring task comments" in result.output
-        assert "Cleared comments" in result.output
-        mock_api.delete_comment.assert_any_call("c1")
-        mock_api.delete_comment.assert_any_call("c2")
-        mock_api.complete_task.assert_called_once_with("123")
-
     def test_close_clear_comments(self, mock_api, mock_token):
         """Close can clear comments before completing."""
-        mock_api.get_task.return_value = make_mock_task(id="123", due=None)
         mock_api.get_comments.return_value = iter([[
             make_mock_comment(id="c1", content="one"),
             make_mock_comment(id="c2", content="two"),
@@ -739,7 +719,6 @@ class TestClose:
 
     def test_close_clear_comments_keep_plan(self, mock_api, mock_token):
         """Close with keep-plan keeps rolling plan comments."""
-        mock_api.get_task.return_value = make_mock_task(id="123", due=None)
         mock_api.get_comments.return_value = iter([[
             make_mock_comment(id="c1", content="[openclaw:plan] plan"),
             make_mock_comment(id="c2", content="[openclaw:progress] log"),
