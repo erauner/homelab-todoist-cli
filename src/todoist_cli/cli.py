@@ -4,7 +4,7 @@ import json
 import re
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 import uuid
 from zoneinfo import ZoneInfo
 import typer
@@ -55,6 +55,49 @@ def get_autodoist_client() -> AutodoistClient:
     """Get configured Autodoist API client."""
     url = get_autodoist_url()
     return AutodoistClient(base_url=url)
+
+
+def _to_autodoist_task_dict(task: Any) -> dict[str, Any]:
+    """Convert Todoist SDK task object to Autodoist-compatible task dict."""
+    updated_at = getattr(task, "updated_at", None)
+    updated_str = updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at
+    labels_value = getattr(task, "labels", []) or []
+    labels_out = [str(label) for label in labels_value]
+    return {
+        "id": str(getattr(task, "id", "")),
+        "content": str(getattr(task, "content", "")),
+        "labels": labels_out,
+        "updated_at": updated_str or "",
+    }
+
+
+def _fetch_focus_tasks_resilient(
+    *,
+    client: AutodoistClient,
+    api: TodoistAPI,
+    focus_label: str,
+) -> tuple[list[dict[str, Any]], str]:
+    """
+    Fetch focus tasks from Autodoist; fallback to direct Todoist label query.
+
+    Autodoist /api/tasks can be temporarily out-of-sync with full Todoist state
+    during polling windows, so this keeps CLI responses accurate.
+    """
+    try:
+        payload = client.tasks(label=focus_label, contains=None)
+        tasks = payload.get("tasks", []) or []
+    except AutodoistClientError:
+        tasks = []
+
+    if tasks:
+        return tasks, "autodoist"
+
+    todoist_tasks: list[Any] = []
+    for page in api.get_tasks(label=focus_label):
+        todoist_tasks.extend(page)
+    if not todoist_tasks:
+        return [], "autodoist"
+    return [_to_autodoist_task_dict(task) for task in todoist_tasks], "todoist_direct"
 
 
 def get_project_map(api: Optional[TodoistAPI] = None, client: Optional[TodoistClient] = None) -> dict[str, str]:
@@ -255,6 +298,8 @@ def _parse_iso_date(value: object) -> Optional[date]:
     """Parse a date-like value into a date object."""
     if value is None:
         return None
+    if isinstance(value, datetime):
+        return value.date()
     if isinstance(value, date):
         return value
     if isinstance(value, str):
@@ -1773,6 +1818,7 @@ def autodoist_state(
 ):
     """Show Autodoist state summary."""
     client = get_autodoist_client()
+    api = get_api()
     try:
         payload = client.state()
     except AutodoistClientError as exc:
@@ -1789,9 +1835,21 @@ def autodoist_state(
     console.print(f"open_tasks: {summary.get('open_tasks', 0)}")
     console.print(f"{labels.get('next_action_label', 'next_action')}: {summary.get('next_action_count', 0)}")
     focus_label = labels.get("focus_label") or labels.get("doing_now_label", "focus")
-    focus_count = summary.get("focus_count", summary.get("doing_now_count", 0))
+    focus_count = int(summary.get("focus_count", summary.get("doing_now_count", 0)) or 0)
+    fallback_count = 0
+    if focus_count == 0:
+        direct_tasks = []
+        for page in api.get_tasks(label=focus_label):
+            direct_tasks.extend(page)
+        fallback_count = len(direct_tasks)
+    effective_focus_count = fallback_count if fallback_count > focus_count else focus_count
     focus_conflicts = summary.get("focus_conflicts", summary.get("doing_now_conflicts", 0))
-    console.print(f"{focus_label}: {focus_count}")
+    console.print(f"{focus_label}: {effective_focus_count}")
+    if effective_focus_count != focus_count:
+        console.print(
+            f"[yellow]Note:[/yellow] Autodoist reported {focus_count}, "
+            f"direct Todoist label lookup found {effective_focus_count}."
+        )
     console.print(f"focus_conflicts: {focus_conflicts}")
 
 
@@ -1804,11 +1862,30 @@ def autodoist_tasks(
 ):
     """List tasks from Autodoist API state."""
     client = get_autodoist_client()
+    api = get_api()
+    fallback_source = "autodoist"
+    focus_label = "focus"
     try:
-        payload = client.tasks(label=label, contains=contains)
-    except AutodoistClientError as exc:
-        console.print(f"[red]Failed to fetch Autodoist tasks:[/red] {exc}")
-        raise typer.Exit(1)
+        state = client.state()
+        labels = state.get("labels", {}) or {}
+        focus_label = labels.get("focus_label") or labels.get("doing_now_label", "focus")
+    except AutodoistClientError:
+        pass
+
+    normalized_label = (label or "").lstrip("@").strip().lower()
+    if normalized_label and normalized_label == focus_label.lower():
+        tasks, fallback_source = _fetch_focus_tasks_resilient(
+            client=client,
+            api=api,
+            focus_label=focus_label,
+        )
+        payload = {"tasks": tasks}
+    else:
+        try:
+            payload = client.tasks(label=label, contains=contains)
+        except AutodoistClientError as exc:
+            console.print(f"[red]Failed to fetch Autodoist tasks:[/red] {exc}")
+            raise typer.Exit(1)
 
     tasks = payload.get("tasks", [])
     if limit is not None and limit >= 0:
@@ -1818,6 +1895,7 @@ def autodoist_tasks(
         out = dict(payload)
         out["tasks"] = tasks
         out["count"] = len(tasks)
+        out["source"] = fallback_source
         typer.echo(json.dumps(out, indent=2, sort_keys=True))
         return
 
@@ -1829,6 +1907,8 @@ def autodoist_tasks(
         labels = ",".join(task.get("labels", []))
         updated = task.get("updated_at", "n/a")
         console.print(f"{task.get('id', '')} [{updated}] @{labels} {task.get('content', '')}")
+    if fallback_source == "todoist_direct":
+        console.print("[dim]source: todoist_direct[/dim]")
 
 
 @autodoist_app.command("checkin")
@@ -1849,13 +1929,11 @@ def autodoist_checkin(
     next_action_label = labels.get("next_action_label", "next_action")
     focus_label = labels.get("focus_label") or labels.get("doing_now_label", "focus")
 
-    try:
-        focus_payload = client.tasks(label=focus_label, contains=None)
-    except AutodoistClientError as exc:
-        console.print(f"[red]Failed to fetch focus tasks:[/red] {exc}")
-        raise typer.Exit(1)
-
-    focus_tasks = focus_payload.get("tasks", []) or []
+    focus_tasks, focus_source = _fetch_focus_tasks_resilient(
+        client=client,
+        api=api,
+        focus_label=focus_label,
+    )
     focus_ids = {str(t.get("id")) for t in focus_tasks if t.get("id") is not None}
 
     next_tasks = []
@@ -1874,6 +1952,7 @@ def autodoist_checkin(
         payload = {
             "focus_label": focus_label,
             "next_action_label": next_action_label,
+            "focus_source": focus_source,
             "focus_tasks": focus_tasks,
             "candidate_tasks": [
                 {
@@ -1901,6 +1980,8 @@ def autodoist_checkin(
                 f"\n[bold]Best next after focus:[/bold] {best.content} ({best.id})"
             )
             console.print(canonical_task_url(str(best.id)))
+        if focus_source == "todoist_direct":
+            console.print("[dim]focus source: todoist_direct fallback[/dim]")
         return
 
     console.print("[yellow]No current @focus task.[/yellow]")

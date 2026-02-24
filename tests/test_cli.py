@@ -1402,6 +1402,7 @@ class TestAutodoist:
 
     def test_autodoist_tasks(self):
         mock_client = MagicMock()
+        mock_client.state.return_value = {"labels": {"focus_label": "focus"}}
         mock_client.tasks.return_value = {
             "tasks": [
                 {"id": "1", "content": "First", "labels": ["focus"], "updated_at": "2026-01-01T00:00:00Z"},
@@ -1441,10 +1442,13 @@ class TestAutodoist:
             "labels": {"next_action_label": "next_action", "focus_label": "focus"}
         }
         mock_client.tasks.return_value = {"tasks": []}
-        mock_api.get_tasks.return_value = iter([[
-            make_mock_task(id="na1", content="Overdue task", labels=["next_action"], due=make_mock_due("2000-01-01")),
-            make_mock_task(id="na2", content="Later task", labels=["next_action"], due=make_mock_due("2099-01-01")),
-        ]])
+        mock_api.get_tasks.side_effect = [
+            iter([[]]),  # focus fallback: no focused tasks found directly
+            iter([[
+                make_mock_task(id="na1", content="Overdue task", labels=["next_action"], due=make_mock_due("2000-01-01")),
+                make_mock_task(id="na2", content="Later task", labels=["next_action"], due=make_mock_due("2099-01-01")),
+            ]]),
+        ]
 
         with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
             result = runner.invoke(app, ["autodoist", "checkin"])
@@ -1453,6 +1457,25 @@ class TestAutodoist:
         assert "No current @focus task." in result.output
         assert "Suggested next_action candidates:" in result.output
         assert result.output.find("Overdue task") < result.output.find("Later task")
+
+    def test_autodoist_checkin_falls_back_to_direct_todoist_focus(self, mock_api, mock_token):
+        mock_client = MagicMock()
+        mock_client.state.return_value = {
+            "labels": {"next_action_label": "next_action", "focus_label": "focus"}
+        }
+        mock_client.tasks.return_value = {"tasks": []}
+        mock_api.get_tasks.side_effect = [
+            iter([[make_mock_task(id="focus-1", content="Focus from Todoist", labels=["focus"])]]),
+            iter([[make_mock_task(id="na1", content="Next task", labels=["next_action"])]]),
+        ]
+
+        with patch("todoist_cli.cli.get_autodoist_client", return_value=mock_client):
+            result = runner.invoke(app, ["autodoist", "checkin"])
+
+        assert result.exit_code == 0
+        assert "Current focus:" in result.output
+        assert "Focus from Todoist" in result.output
+        assert "focus source: todoist_direct fallback" in result.output
 
     def test_autodoist_focus_apply(self):
         mock_client = MagicMock()
