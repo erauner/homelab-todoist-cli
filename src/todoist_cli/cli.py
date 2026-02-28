@@ -913,11 +913,18 @@ def inbox(
     """
     api = get_api()
 
-    # Find the Inbox project ID
+    # Find the Inbox project ID.
+    # Todoist SDK models have used both `inbox_project` (legacy) and
+    # `is_inbox_project` (current); support both to avoid runtime regressions.
     inbox_project_id = None
     for page in api.get_projects():
         for p in page:
-            if p.inbox_project:
+            is_inbox_project = getattr(p, "is_inbox_project", None)
+            if is_inbox_project is None:
+                is_inbox_project = getattr(p, "inbox_project", False)
+            if not is_inbox_project and str(getattr(p, "name", "")).strip().lower() == "inbox":
+                is_inbox_project = True
+            if is_inbox_project:
                 inbox_project_id = p.id
                 break
         if inbox_project_id:

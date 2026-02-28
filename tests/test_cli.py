@@ -49,13 +49,20 @@ def make_mock_due(date: str, string: str = None, datetime: str = None):
     return due
 
 
-def make_mock_project(id: str = "proj1", name: str = "Inbox", color: str = "grey", inbox_project: bool = False):
+def make_mock_project(
+    id: str = "proj1",
+    name: str = "Inbox",
+    color: str = "grey",
+    inbox_project: bool = False,
+):
     """Create a mock project object."""
     project = MagicMock()
     project.id = id
     project.name = name
     project.color = color
+    # Keep both field names to match old/new Todoist SDK project models.
     project.inbox_project = inbox_project
+    project.is_inbox_project = inbox_project
     return project
 
 
